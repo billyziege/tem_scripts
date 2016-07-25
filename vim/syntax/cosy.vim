@@ -32,7 +32,7 @@ syn keyword cosySubRoutine procedure PROCEDURE
 syn keyword cosySubRoutine endprocedure ENDPROCEDURE
 
 syn match declaredDimensions contained "[^;]\+"
-syn match declaredSize contained "[a-z,A-Z,0-9,_,*,\^,+,\(,\)]\+" nextgroup=declaredDimensions skipwhite
+syn match declaredSize contained "[a-z,A-Z,0-9,_,*,\^,+,\(,\),\-]\+" nextgroup=declaredDimensions skipwhite
 syn match declaredName contained "[a-z,A-Z,0-9,_]\+" nextgroup=declaredSize skipwhite
 syn keyword cosyDeclaration contained variable VARIABLE nextgroup=declaredName skipwhite
 syn region cosyDeclarationBlock start="variable\|VARIABLE" end=";" fold transparent contains=cosyDeclaration,declaredName,declaredSize,declaredDimensions
@@ -41,6 +41,9 @@ syn match cosyStringDouble contained "[^"]\+"
 syn region cosyStringDoubleBlock start=+"+ end=+"+ fold contains=cosyStringDouble
 syn match cosyStringSingle contained "[^']\+"
 syn region cosyStringSingleBlock start=+'+ end=+'+ fold contains=cosyStringSingle
+
+syn region cosyProcedureBlock start=+procedure+ end=+endprocedure+ fold
+syn region cosyFunctionBlock start=+function+ end=+endfunction+ fold
 
 syn match cosyAssignment ":="
 
@@ -174,6 +177,18 @@ syn keyword cosySpecialProcedure GRMIMA grmima
 syn keyword cosySpecialProcedure RKCO rkco
 syn keyword cosySpecialProcedure POLSET polset
 syn keyword cosySpecialProcedure POLVAL polval
+syn keyword cosySpecialProcedure sin SIN
+syn keyword cosySpecialProcedure cos COS
+syn keyword cosySpecialProcedure tan TAN
+syn keyword cosySpecialProcedure asin ASIN
+syn keyword cosySpecialProcedure acos ACOS
+syn keyword cosySpecialProcedure atan ATAN
+syn keyword cosySpecialProcedure sinh SINH
+syn keyword cosySpecialProcedure cosh COSH
+syn keyword cosySpecialProcedure tanh TANH
+syn keyword cosySpecialProcedure int INT
+syn keyword cosySpecialProcedure sqrt SQRT
+
 
 let b:current_suntax = "cosy"
 

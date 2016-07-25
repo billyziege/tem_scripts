@@ -32,7 +32,7 @@ with open(args.list_of_directories) as f:
     ez = simulation_output.returnEmmitance("z")
     if ex == 0 or ez == 0:
       continue
-    output.append(str(100 * int(cosy_output.returnTableValue("number macroparticles",row_numbers[0]))))
+    output.append(str(folder_metadata["total_electrons"]))
     output.append(str(ex))
     output.append(str(ez))
     output.append(folder_metadata["applied_field"])

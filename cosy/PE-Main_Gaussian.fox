@@ -1,0 +1,3826 @@
+include 'cosy';
+
+procedure run;
+
+
+variable tnptcl 1; {Total no. of electrons that are created}
+variable nptcl 1; {Total no .of electrons}
+variable npp 1;   {Max. possible no. of electrons in each nodes}
+variable cnpp 1;  {No. of new electrons}
+variable mnpp 1;  {Max. no. of electrons in each node}
+variable n 1 ;    {Actual no. of electrons in each nodes} 
+variable nc 1;
+
+variable ip 1;    {Each node has a different ip}
+variable np 1;    {No. of nodes}
+variable cp 1;
+
+variable me 1;   {Electron mass}
+variable q 1;    {Charge number}
+variable c0 1;   {Speed of light}
+variable pi 1;
+variable mpr 1;   {Macro particle rate}
+variable e 1;
+
+
+variable t 1; {Time }
+variable dt 1; {Time step size}
+variable nt 1;
+variable aNt 1 10;
+variable aDt 1 10;
+variable nr 1;
+
+variable dim 1; 
+variable i 1;
+
+
+variable noda 1; {DA order}
+variable nvda 1; {No. of DA varaibles}
+variable nbr 1;  {Define the neighbor boxes}
+variable ns 1;   {Max no. of particles in a childless box}
+variable nm 1;
+variable sizebox 1; 
+variable sizeidx 1; 
+variable sizeda 1; 
+
+variable PHEr 40401;  {Er of the positive hole field}
+variable PHEz 40401;    {Ez of the positive hole field}
+
+{JENNI}
+variable PHEr2 40401;  
+variable PHEz2 40401;  
+variable sigmax 1;
+variable sigmax0 1;
+variable dr0 1;
+variable dz0 1;
+
+variable extEz 1;
+variable extz 1;
+variable pz 1;
+variable rate 1;
+
+variable IniCondition 1000;
+variable rcdStep 1;
+variable IntCHC 1;
+variable CTN 1;
+variable postiveHoleFile 1000;
+variable string 1000;
+
+procedure create_vector vector_length input_vector;
+  {
+  Create a vector v of length l with all elements zero. 
+  l: length of the vector v;
+  v: the vector 
+  When creating a large vector, one should use scrlen to increase the size
+of the scratch variable. Otherwise this procedure might cause an error as
+"ERROR IN VEUVE, VARIABLE EXHAUSTED!"
+  }
+  procedure run_create_vector;
+    {Divides v into 2^n1 + 2^n2 + 2^n3 + ... chunks and a final remainder that is 0 or 1 or 2 and builds 
+    the input vector exponentially for these sections.}
+    variable i 1; 
+    variable power_of_two 1; 
+    variable initialized 1; 
+    variable remainder 1; 
+    variable temp_vector l; {will hold pieces of length 2^n} 
+  
+    power_of_two := nint(log(vector_length)/log(2)-0.5); {round down for the closest power of 2 to vector_length}
+    remainder := vector_length-2^n; 
+    initialized := 0; {indicates that input_vector is not initialized}
+    while remainder>2;
+      temp_vector := 0;
+      loop i 1 power_of_two; {each round doubles the size of temp_vector producing one vector of length 2^power_of_two} 
+        temp_vector := temp_vector&temp_vector; 
+      endloop;
+      if initialized#0; 
+        input_vector := input_vector&w; {extend the input_vector by 2^power_of_two}
+      elseif initialized=0; 
+        input_vector:=w; 
+        initialized := 1; 
+      endif;   
+      power_of_two := nint(log(remainder)/log(2)-0.5);{round down for the closest power of 2 to remainder for a new power_of_two}
+      remainder := remainder-2^n;    
+    endwhile;
+    temp_vector := 0;
+    loop i 1 power_of_two; {only activated if remainder was last 2}
+      temp_vector := temp_vector&temp_vector; 
+    endloop;
+    if initialized#0; 
+      input_vector := input_vector&w; 
+    elseif initialized=0; 
+      input_vector:= temp_vector; 
+      initialized := 1; 
+    endif;   
+    loop i length(input_vector)+1 vector_lengthl;
+      input_vectorv := input_vector&0; 
+    endloop;
+  endprocedure;
+  if vector_length>1e5; {need to be mindful of RAM, this if sets additional scratch} 
+    scrlen vector_length; 
+    runcrv; 
+    scrlen 1e5;
+  elseif 1=1; 
+    runcrv;  
+  endif;
+endprocedure; 
+
+
+procedure spacecharge 
+         sign npp n np nptcl ns noda nvda sizebox sizeidx sizeda rate x y z ex ey ez;
+  { use global: npp, np, ip
+    use procedure: create_vectorv
+  }
+
+  variable box sizebox; 
+  variable nchld sizebox; 
+  variable boxl sizebox;
+  variable boxp sizebox; 
+  {variable st 1 100;}
+
+  variable idx sizebox; 
+  variable nidx sizebox; 
+  variable link nptcl;
+  variable boxcx sizebox; 
+  variable boxcy sizebox; 
+  variable boxcz sizebox;
+  
+  variable bs 1; variable scale 1;  variable l 1; variable ncls 1;
+  variable sizep 1; {variable nbox 1;}
+  
+  variable scx nptcl; variable scy nptcl; variable scz nptcl; variable pnpp 1;
+  
+ 
+  
+  procedure gatherxyz x y z xx yy zz;
+    {Put the coordinates into the vectors that will be accessed separately by mpi}}
+    variable i 1; variable j 1 ;
+    variable gx npp np; variable gy npp np; variable gz npp np;
+    ploop i 1 np;
+      gx(i) := x; gy(i) := y; gz(i) := z;
+    endploop gx gy gz;
+    {
+    loop i 1 np;
+      loop j 1 npp;
+        velset xx (i-1)*npp+j gx(i)|j;
+        velset yy (i-1)*npp+j gy(i)|j;
+        velset zz (i-1)*npp+j gz(i)|j;
+      endloop;
+    endloop;
+    }
+    
+    xx := gx(1); yy := gy(1); zz := gz(1);
+    loop i 2 np;
+      xx := xx&gx(i); yy := yy&gy(i); zz := zz&gz(i);
+    endloop;
+  endprocedure; 
+  
+  procedure gatherxyznew x y z xx yy zz;
+    variable n 1; variable i 1; variable j 1; variable ni 1;
+    variable gx npp np; variable gy npp np; variable gz npp np;
+    
+    procedure gxyz n1 n2 x xx;
+      variable tmp npp*ni; variable i 1;
+      tmp := x(n1);
+      loop i n1+1 n2;
+        tmp := tmp&x(i);
+      endloop;
+      xx := xx&tmp;      
+    endprocedure;
+    
+    ploop i 1 np;
+      gx(i) := x; gy(i) := y; gz(i) := z;
+    endploop gx gy gz;
+    
+    n := 20;
+    ni := nint(np/ni-0.5);
+    if n<np;
+      loop i 1 n;
+        if i>1; 
+          gxyz (i-1)*ni+1 i*ni gx xx;
+          gxyz (i-1)*ni+1 i*ni gy yy;
+          gxyz (i-1)*ni+1 i*ni gz zz; 
+        elseif i=1;
+          xx := gx(1); yy := gy(1); zz := gz(1);
+          loop j 2 ni;
+            xx := xx&gx(j); yy := yy&gy(j); zz := zz&gz(j);
+          endloop;
+        endif;
+      endloop;
+      if n*ni<np;
+        gxyz n*ni+1 np gx xx;
+        gxyz n*ni+1 np gy yy;
+        gxyz n*ni+1 np gz zz; 
+      endif;
+    elseif 1=1;
+      xx := gx(1); yy := gy(1); zz := gz(1);
+      loop i 2 np;
+        xx := xx&gx(i); yy := yy&gy(i); zz := zz&gz(i);
+      endloop;
+    endif;
+  endprocedure;
+  
+  procedure setzero;
+    create_vector sizebox box; 
+    nchld := box; boxl := box; boxp := box; 
+    boxcx := box; boxcy := box; boxcz := box;
+    idx := box; nidx := box;
+    {crv nptcl link;}
+    create_vector n ex; ey := ex; ez := ex;
+    create_vector nptcl scx; scy := scx; scz := scx;
+  endprocedure;
+   
+
+  procedure pcuttingbox3d;
+    variable pntb1 1; variable pntb2 1; variable nbc 1; 
+    variable tbcx 1 8; variable tbcy 1 8; variable tbcz 1 8; 
+    variable tnid 1 8; variable tidx 1 8; variable tid 1 8;
+    variable plink npp; variable pnidx sizebox; {variable lup 1;}
+    variable lidx sizebox; {variable tv sizebox;}
+    
+    {variable i 1; variable j 1; variable outp 1000; }
+    
+    procedure setscx;
+      variable vmx 1; variable vnx 1; variable vmy 1; variable vny 1;
+      variable vmz 1; variable vnz 1; 
+      variable pv 1 6 np; variable i 1; 
+      
+      ploop i 1 np;
+        pv(1,i) := vmax(x);
+        pv(2,i) := vmax(y);
+        pv(3,i) := vmax(z);
+        pv(4,i) := vmin(x);
+        pv(5,i) := vmin(y);
+        pv(6,i) := vmin(z);
+      endploop pv;
+      
+      vmx := pv(1,1); vmy := pv(2,1); vmz := pv(3,1);
+      vnx := pv(4,1); vny := pv(5,1); vnz := pv(6,1);
+      
+      loop i 2 np;
+        if pv(1,i)>vmx; vmx := pv(1,i); endif;
+        if pv(2,i)>vmy; vmy := pv(2,i); endif;
+        if pv(3,i)>vmz; vmz := pv(3,i); endif;
+        if pv(4,i)<vnx; vnx := pv(4,i); endif;
+        if pv(5,i)<vny; vny := pv(5,i); endif;
+        if pv(6,i)<vnz; vnz := pv(6,i); endif;
+      endloop;
+      
+      bs := vmx-vnx; 
+      if vmy-vny>bs; bs := vmy-vny; endif;
+      if vmz-vnz>bs; bs := vmz-vnz; endif;
+      bs := bs*(1+1e-6);
+      
+  {if ip=1; 
+    write 6 vmx&vmy&vmz&vnx&vny&vnz&bs;
+    endif;}  
+
+      scx := x-0.5*(vmx+vnx)+0.5*bs;
+      scy := y-0.5*(vmy+vny)+0.5*bs;
+      scz := z-0.5*(vmz+vnz)+0.5*bs;
+      
+     { write 6 'bs=' bs;}
+      
+     
+    
+    endprocedure;
+    
+       
+    procedure center nx ny nz l bs cx cy cz;
+      variable bsl 1;
+      bsl := bs*(0.5)^l;
+      cx := nx*bsl+0.5*bsl; cy := ny*bsl+0.5*bsl;  cz := nz*bsl+0.5*bsl; 
+
+    endprocedure;  
+
+    procedure nxyz cx cy cz l bs nx ny nz;
+      variable bsl 1;
+      bsl := bs*(0.5)^l;
+      nx := nint(cx/bsl-0.5); ny := nint(cy/bsl-0.5); nz := nint(cz/bsl-0.5);
+    endprocedure;
+ 
+    procedure findid l nx ny nz idbox;
+      idbox := nx*4^l+ny*2^l+nz+1;
+    endprocedure; 
+  
+    procedure shift x y z cx cy cz bsl scx scy scz;
+     variable i 1;
+     i := 2/bsl; 
+     scx := (x-cx)*i+0.5; 
+     scy := (y-cy)*i+0.5; 
+     scz := (z-cz)*i+0.5; 
+    endprocedure;
+    
+    procedure scalecxyz;
+      boxcx := boxcx*scale; boxcy := boxcy*scale; boxcz := boxcz*scale;
+    endprocedure;     
+   
+
+    procedure childcenter cx cy cz l bs;
+      variable tcx 1; variable tcy 1; variable tcz 1; 
+      variable cnx 1; variable cny 1; variable cnz 1; 
+      variable nx 1; variable ny 1; variable nz 1;
+      variable cid 1;
+      nxyz cx cy cz l bs nx ny nz;
+      loop cnx 0 1;
+        loop cny 0 1;
+          loop cnz 0 1;
+            findid 1 cnx cny cnz cid;
+            tnid(cid) := 0;
+            center 2*nx+cnx 2*ny+cny 2*nz+cnz l+1 bs tcx tcy tcz; 
+            {write 6 '=' cx&cy&nx&ny;
+            write 6 tcx&tcy&cnx&cny&cid; }
+            tbcx(cid) := tcx; tbcy(cid) := tcy; tbcz(cid) := tcz; 
+           endloop;
+        endloop;
+      endloop;
+    endprocedure;
+
+    procedure crtchildren pntb cx cy cz scale;  
+      variable i 1; variable tnc 1;  variable cid 1;
+      variable cnx 1; variable cny 1; variable cnz 1; variable tmp 1;
+      
+      {variable cpx nptcl; variable cpy nptcl; variable cpz nptcl;}
+      
+      loop i 1 8; tnid(i) := 0; tidx(i) := 0; endloop;
+      
+      
+      if pntb#1;
+        tnc := idx|pntb;
+        loop i 1 pnidx|pntb;
+         { if pntb=23;
+          write 6 '**********' pntb&i&tnc&pnidx|pntb; read 5 i;
+       endif;}
+       
+          cnx := nint((scx|tnc-cx)*scale+0.5); if cnx=-1; cnx := 0; endif;
+          cny := nint((scy|tnc-cy)*scale+0.5); if cny=-1; cny := 0; endif;
+          cnz := nint((scz|tnc-cz)*scale+0.5); if cnz=-1; cnz := 0; endif;
+          
+          {write 6 scx|tnc&scy|tnc&cx&cy&scale&cnx&cny&tnc;}
+          
+          
+          findid 1 cnx cny cnz cid; {write 6 cnx&cny&cid;}
+      {   
+     if (pntb=4);
+          write 6 '****';
+          write 6 boxcx|(boxp|pntb)&boxcy|(boxp|pntb)&boxcz|(boxp|pntb);          
+          write 6 pntb&i&tnc&pnidx|pntb;
+          write 6 scx|tnc&scy|tnc&scz|tnc;
+          write 6 cx&cy&cz&scale; 
+          write 6 cnx&cny&cnz&cid;
+          read 5 i;
+     endif; 
+     }
+     
+       
+      {
+      
+        if tnc=263;
+          write 6 '******';
+          write 6 pntb&i&tnc&pnidx|pntb&plink|tnc;
+          write 6 scx|tnc&scy|tnc&scz|tnc;
+          write 6 cx&cy&cz&scale; 
+          write 6 cnx&cny&cnz&cid;
+        endif;
+        }
+
+        
+          {if tnc=195; write 6  scx|tnc&scy|tnc&cx&cy&scale&cnx&cny&cid; endif;}
+          
+          tnid(cid) := tnid(cid)+1;
+          if tnid(cid)>1;
+            velset plink tid(cid) tnc;
+            tid(cid) := tnc;
+          elseif tnid(cid)=1;
+            tidx(cid) := tnc;
+            tid(cid) := tnc;
+          endif;
+          tmp := tnc;
+          tnc := plink|tnc;
+          {
+          tmp := plink|tnc;
+          velset plink tnc 0;
+          tnc := tmp;
+          }
+        endloop;
+        {velset plink tmp 0;}
+        loop i 1 8;
+          if tid(i)>0; velset plink tid(i) 0; endif;
+        endloop;
+
+      elseif 1=1;
+        {
+        if nptcl>1e5; 
+          scrlen nptcl; shift scx scy scz cx cy cz bs cpx cpy cpz; scrlen 1e5;
+        elseif 1=1;
+          shift scx scy scz cx cy cz bs cpx cpy cpz; 
+        endif;
+        }
+        loop i 1 pnpp;
+          {
+          cnx := nint(cpx|i); if cnx=-1; cnx := 0; endif;
+          cny := nint(cpy|i); if cny=-1; cny := 0; endif;
+          cnz := nint(cpz|i); if cnz=-1; cnz := 0; endif;
+          }
+          cnx := nint((scx|i-cx)*scale+0.5); if cnx=-1; cnx := 0; endif;
+          cny := nint((scy|i-cy)*scale+0.5); if cny=-1; cny := 0; endif;
+          cnz := nint((scz|i-cz)*scale+0.5); if cnz=-1; cnz := 0; endif;
+          
+          findid 1 cnx cny cnz cid; 
+          
+     {   if i=263;
+          write 6 '******';
+          write 6 pntb&i&tnc&pnidx|pntb;
+          write 6 scx|i&scy|i&scz|i;
+          write 6 cx&cy&cz&scale; 
+          write 6 cnx&cny&cnz&cid;
+        endif;
+       }   
+          {
+          write 6 scx|i&scy|i&scz|i;
+          write 6 cx&cy&cz&scale; 
+          write 6 cnx&cny&cnz&cid;
+          }
+          tnid(cid) := tnid(cid)+1;
+          if tnid(cid)>1;
+            velset plink tid(cid) i;
+            tid(cid) := i;
+          elseif tnid(cid)=1;
+            tidx(cid) := i;
+            tid(cid) := i;
+          endif;
+        endloop;
+      endif;
+    endprocedure;
+      
+    procedure cprschildren pntb l; 
+      variable cntcld 1; variable bsl 1; variable scale 1;
+      variable cx 1; variable cy 1; variable cz 1;
+      variable i 1;
+      
+      cntcld := 0; 
+      l := boxl|pntb;
+      bsl := bs*0.5^l;
+      cx := boxcx|pntb;  cy := boxcy|pntb;  cz := boxcz|pntb; 
+      scale := 2/bsl;
+      
+   {   write 6 'cprschildren';
+      write 6 'bs pntb boxl|pntb:' bs&pntb&boxl|pntb;
+      write 6 'l bsl cx cy cz scale:' l&bsl&cx&cy&cz&scale;
+    }  
+      childcenter cx cy cz l bs; {write 6 cx&cy&l&bsl;}
+      crtchildren pntb cx cy cz scale; 
+      l := l+1;
+     { read 5 i;}
+        
+    endprocedure;
+   
+    procedure pcutting pntb1 nbc pntb2;
+      variable i 1; variable j 1; variable pp 1; 
+      variable trnidx 8 nbc np; variable onidx 8 np;
+      variable pboxcx 8 nbc; variable pboxcy 8 nbc; variable pboxcz 8 nbc; 
+      variable pboxl 8 nbc; variable pidx 8 nbc;
+      variable vboxcx 8; variable vboxcy 8; variable vboxcz 8; 
+      variable vboxl 8;  variable vidx 8; variable vnidx 8;
+      variable cnt 1;
+
+      vidx := 0&0&0&0&0&0&0&0;
+      vboxcx := vidx; vboxcy := vidx; vboxcz := vidx;
+      vboxl := vidx; vnidx := vidx;
+      
+      ploop pp 1 np;
+        loop i 1 nbc;
+         if nidx|(pntb1+i)>ns;
+          cprschildren pntb1+i l;
+          loop j 1 8;
+            velset vboxl j l;
+            velset vboxcx j tbcx(j);
+            velset vboxcy j tbcy(j);
+            velset vboxcz j tbcz(j);
+            if tnid(j)>0;               
+              velset vnidx j tnid(j);
+              velset vidx j tidx(j);
+           endif;
+          endloop; 
+            pboxl(i) := vboxl;
+            pboxcx(i) := vboxcx;
+            pboxcy(i) := vboxcy;
+            pboxcz(i) := vboxcz;
+            pidx(i) := vidx;
+            trnidx(i,pp) := vnidx;
+            
+            vidx := 0*vidx; vboxcx := vidx; vboxcy := vidx; vboxcz := vidx;
+            vboxl := vidx; vnidx := vidx;
+         endif;          
+        endloop;
+      endploop trnidx;
+      
+     if sign=1; 
+      loop i 1 nbc;
+        vnidx := vidx;
+        loop pp 1 np;
+          vnidx := vnidx+trnidx(i,pp);
+        endloop;
+        
+        cnt := 0;
+        loop j 1 8;
+          if vnidx|j>0;
+            cnt := cnt+1;
+          endif;
+        endloop;
+        
+        if cnt>1;
+          loop j 1 8;
+            if vnidx|j>0;
+            pntb2 := pntb2+1;            
+           if pntb2<(sizebox+1);
+            velset boxl pntb2 pboxl(i)|j;
+            velset boxcx pntb2 pboxcx(i)|j;
+            velset boxcy pntb2 pboxcy(i)|j;
+            velset boxcz pntb2 pboxcz(i)|j;
+            velset boxp pntb2 pntb1+i;
+            velset idx pntb2 pidx(i)|j;
+            velset nidx pntb2 vnidx|j;           
+            velset pnidx pntb2 trnidx(i,ip)|j;           
+            velset box pntb1+i pntb2+1-cnt;
+            velset nchld pntb1+i cnt;
+            velset nidx pntb1+i 0;
+            velset idx pntb1+i 0;
+           elseif 1=1;
+             sign:=0; {write 6 '1 sign=0'&s(pntb2);}
+           endif;           
+            endif;
+          endloop;
+        elseif cnt=1;
+        
+          loop cnt 1 8;
+            if vnidx|cnt>0;
+              j := cnt;                  
+            endif;
+          endloop;  
+          cnt := 1;
+          
+          l := pboxl(i)|j;
+          tbcx(j) := pboxcx(i)|j;
+          tbcy(j) := pboxcy(i)|j;
+          tbcz(j) := pboxcz(i)|j;
+          
+          while cnt<2;
+           { write 6 '**pcutting: cnt=1';}
+            ploop pp 1 np;
+              loop cnt 1 8;
+                if vnidx|cnt>0;
+                  j := cnt;                  
+                endif;
+              endloop;  
+                
+                velset boxl pntb1+i l;
+                velset boxcx pntb1+i tbcx(j);
+                velset boxcy pntb1+i tbcy(j);
+                velset boxcz pntb1+i tbcz(j);
+              
+              { 
+                velset boxl pntb1+i pboxl(i)|j;
+                velset boxcx pntb1+i pboxcx(i)|j;
+                velset boxcy pntb1+i pboxcy(i)|j;
+                velset boxcz pntb1+i pboxcz(i)|j;
+               }  
+                cprschildren pntb1+i l;
+                
+                vnidx := 0*vnidx;
+                loop j 1 8;
+                  if tnid(j)>0; 
+                    velset vnidx j tnid(j);
+                  endif;
+                endloop;
+                onidx(ip) := vnidx;
+              
+            endploop onidx;
+            
+            vnidx := onidx(1);
+            loop pp 2 np;
+              vnidx := vnidx+onidx(pp);
+            endloop;
+            
+            cnt := 0;
+            loop j 1 8;
+              if vnidx|j>0; cnt := cnt+1; endif;
+            endloop;
+          endwhile;
+          
+          loop j 1 8;
+            if vnidx|j>0;
+              pntb2 := pntb2+1;
+             if pntb2<(sizebox+1); 
+              velset boxl pntb2 l;
+              velset boxcx pntb2 tbcx(j);
+              velset boxcy pntb2 tbcy(j);
+              velset boxcz pntb2 tbcz(j);
+              
+              
+              velset boxp pntb2 pntb1+i;
+              velset idx pntb2 tidx(j);
+              {write 6 '===' pntb2&tidx(j)&idx|pntb2;}
+              
+              velset nidx pntb2 vnidx|j;
+              
+              velset pnidx pntb2 tnid(j);
+              
+              
+              velset box pntb1+i pntb2+1-cnt;
+              velset nchld pntb1+i cnt;
+              velset nidx pntb1+i 0;
+              velset idx pntb1+i 0;
+             elseif 1=1;
+              sign:=0; {write 6 '2 sign=0';}
+             endif;
+            endif;
+          endloop;
+          
+        endif; 
+      endloop;
+     endif;
+    endprocedure;
+   
+    procedure plinking ncls lidx;
+      variable pl npp np; variable pp 1; variable plidx ncls np;
+      variable i 1; variable step 1; variable j 1; variable k 1;
+      variable lend ncls; variable tv sizebox;
+      variable getn 1 np;
+      
+      procedure setlink;
+        link := link&(pl(pp)+step);
+      endprocedure;
+      procedure getlink;
+        link := pl(pp);
+      endprocedure;
+      
+      create_vector ncls tv; lend := tv; 
+      ploop pp 1 np;
+        pl(pp) := plink;
+        loop i 1 ncls;
+          velset tv i idx|(lidx|i);
+        endloop;
+        plidx(pp) := tv;
+      endploop pl plidx;
+      
+      idx := idx*0;
+      
+      ploop i 1 np;
+        getn(i) := n;
+      endploop getn;
+      
+      step := 0;
+      {
+      loop i 1 ip-1;
+        step := step+getn(i);
+      endloop;
+      }
+      
+      loop pp 1 np;
+        tv := plidx(pp);
+        
+        {
+        k := (nptcl-(npp-1)*np+1); 
+        if pp<k;
+          step := (pp-1)*npp;
+        elseif 1=1;
+          step := (k-1)*npp+(pp-k)*(npp-1);
+        endif;
+        }
+        
+        
+        
+        if pp>1;
+          if nptcl>1e5; scrlen nptcl; setlink; scrlen 1e5;
+          elseif lo(1); setlink;
+          endif;
+        elseif pp=1;
+          if npp>1e5; scrlen npp; getlink; scrlen 1e5;
+          elseif lo(1); getlink;
+          endif;
+        endif;
+        
+        loop i 1 ncls;
+          j := lidx|(i);          
+          if tv|i>0;         
+            if idx|j=0;
+              velset idx j tv|i+step;            
+              k := idx|j;
+            elseif 1=1;           
+              velset link lend|i tv|i+step;            
+              k := link|(lend|i);                     
+            endif; 
+            while link|k>step;            
+              k := link|k;          
+            endwhile;
+            velset lend i k; 
+          endif;
+        endloop; 
+        
+        step := step+getn(pp);        
+      endloop;     
+    endprocedure;
+   
+   
+    FUNCTION SI  R ; RECST R '(I5)' SI ; endfunction; 
+   
+   
+    if npp>1e5; scrlen npp; setscx; scrlen 1e5; 
+    elseif 1=1; setscx; 
+    endif;
+    
+    create_vector sizebox pnidx;
+    velset nidx 1 nptcl; velset pnidx 1 npp;
+    velset boxcx 1 0.5*bs;
+    velset boxcy 1 0.5*bs; velset boxcz 1 0.5*bs;
+    
+    {write 6 'sizebox sign' sizebox&sign;}
+    {if ip=1; write 6 'bs:'&s(bs); endif;}
+    
+    {
+    
+    if ip<(nptcl-(npp-1)*np+1);
+      create_vector npp plink;
+    elseif 1=1;
+      create_vector npp-1 plink;
+    endif;
+    }
+
+    create_vector n plink;
+    
+     pntb1 := 0; pntb2 := 1;
+     
+     nbc := pntb2-pntb1;
+     if nbc>1e5/np;
+       nbc := int(1e5/np);
+     endif;
+     while (vmax(nidx)>ns)*(sign=1);
+       pcutting pntb1 nbc pntb2;
+       pntb1 := pntb1+nbc;
+       nbc := pntb2-pntb1;
+       if nbc>1e5/np;
+         nbc := int(1e5/np);
+       endif;
+     endwhile;
+     {nbox := pntb2;}
+     sizebox := pntb2;
+
+   {
+    if sign=1;     
+    openf 26 'checkboxp-'&si(ip)&'.txt' 'unknown';
+    write 26 '     i box nchld boxl boxcx boxcy boxcz idx nidx pnidx boxp';
+    loop i 1 nbox;      
+      outp := si(i)&si(box|i)&si(nchld|i)&si(boxl|i)&s(boxcx|i)&s(boxcy|i);
+      outp := outp&s(boxcz|i)&si(idx|i)&si(nidx|i)&si(pnidx|i)&si(boxp|i);
+      write 26 outp;
+    endloop;
+    closef 26; 
+    endif;
+   }
+
+  if sign=1;         
+    l := vmax(boxl);
+  {
+    if (ip=1)*(sign=1);
+      write 6 'finished cutting boxes'; 
+      write 6 'Total box number: '&si(sizebox);   
+      write 6 'Deepest box level:'&si(l);
+    endif;
+   }  
+    create_vector sizebox lidx;
+    ncls:= 1;
+    loop pntb1 1 sizebox;
+      if nidx|pntb1>0;
+        velset lidx ncls pntb1;
+        ncls := ncls+1;
+      endif;         
+    endloop;
+     
+    ncls := ncls-1; 
+    
+    {
+    create_vector ncls tv;
+    if nptcl>1e5; scrlen nptcl;  
+      plinking ncls lidx;
+      scrlen 1e5;
+    elseif 1=1;
+      plinking ncls lidx;
+    endif;  
+    }
+    
+    plinking ncls lidx;
+    {l := lup;}
+    {st(l) := nbox;}
+
+    scale := 2^(l)/bs;  
+    bs := bs*scale;
+    if length(boxcx)>1e5; 
+      scrlen length(boxcx); scalecxyz; scrlen 1e5;
+    elseif 1=1;
+      scalecxyz;
+    endif;    
+  endif;  
+  
+  endprocedure;  
+   
+   procedure setscx x y z scx scy scz bs;
+    variable vmx 1; variable vnx 1; variable vmy 1; variable vny 1; 
+    variable tmp 1; variable vmz 1; variable vnz 1;
+    
+    vmx := vmax(x); vnx := vmin(x); bs := vmx-vnx; 
+    vmy := vmax(y); vny := vmin(y); tmp := vmy-vny; if tmp>bs; bs := tmp; endif; 
+    vmz := vmax(z); vnz := vmin(z); tmp := vmz-vnz; if tmp>bs; bs := tmp; endif; 
+    bs := bs*(1+1e-6);
+
+    scx := x-0.5*(vmx+vnx)+0.5*bs;
+    scy := y-0.5*(vmy+vny)+0.5*bs;
+    scz := z-0.5*(vmz+vnz)+0.5*bs;
+  endprocedure; 
+
+  procedure scalexyz;
+    scx := scx*scale; scy := scy*scale;  scz := scz*scale;
+  endprocedure;
+   
+  procedure field sizep;
+    variable lb sizebox; variable lcls ncls; variable scls ncls;
+    {variable trp sizep np;} variable ltrp sizep;
+    variable mltp sizeda sizebox; {variable sizelp 1;}
+    {variable sizep 1;} variable sizepp 1;
+    variable trp sizep; variable strp sizep; 
+    variable mx 1;
+    
+    
+    
+    variable pntb 1; variable bcx 1; variable bcy 1; variable bcz 1;
+  `  variable pntpb 1; variable pntcpb 1; variable pntc 1; variable typ 1;
+    variable bbs 1; variable tx ns; variable ty ns; variable tz ns;
+    variable bex ns; variable bey ns; variable bez ns;
+    
+    procedure CnstrLb;
+       variable chkbox sizebox; variable pntb 1; variable cnt 1;
+       variable cntcls 1;
+      create_vector sizebox lb; create_vector ncls lcls; scls := lcls; chkbox := lb;
+      
+      cnt := 0; cntcls := 0; pntb := 1; 
+      while chkbox|1<nchld|1;
+        
+        if chkbox|pntb=nchld|pntb;
+          cnt := cnt+1; 
+          if nchld|pntb=0;
+            cntcls := cntcls+1;
+            velset lcls cntcls cnt;
+            
+            if cntcls<ncls;
+              velset scls cntcls+1 scls|cntcls+nidx|pntb;
+            endif;  
+          endif;
+          velset lb cnt pntb ;
+          pntb := boxp|pntb;
+          velset chkbox pntb chkbox|pntb+1;  
+        elseif 1=1;
+          pntb := box|pntb+chkbox|pntb;
+        endif;  
+      endwhile;
+    endprocedure;
+
+    procedure CnstrTrpOLD;
+      variable tmp l;
+      variable ll 1; variable lr 1; variable cnt 1; variable pntb 1;
+           
+      if (ip>1)*(ip<np);
+        ll := lcls|((ip-1)*mx)+1; lr := lcls|(ip*mx);
+      elseif ip=np;
+        if np#1;
+          ll := lcls|((ip-1)*mx)+1; 
+        elseif np=1;
+          ll := 1;
+        endif;
+          lr := lcls|ncls;
+      elseif ip=1;
+        ll := 1;
+        lr := lcls|mx;  
+      endif;
+      
+      
+      {write 6 mx&ncls&(lcls|1)&(lcls|ncls)&(scls|1)&scls|ncls;}
+      cnt := lr-ll+1;
+      trp := cnt&lb|(ll&lr); {write 6 ll&lr&cnt;}
+      pntb := trp|(cnt+1);
+    
+     
+      while boxp|pntb>1;
+        pntb := boxp|pntb;
+        trp := trp&pntb;
+        velset trp 1 trp|1+1;
+      endwhile;
+      
+      if ip<np;
+        ll := (ip-1)*mx+1;
+        lr := ip*mx;
+      elseif ip=np;
+        ll := (ip-1)*mx+1;
+        lr := ncls;
+      endif;
+      strp := scls|(ll&lr)-scls|ll;
+      
+     { if ip=2; write 6 strp|77&(scls|305-scls|228)&(scls|305-scls|229); endif;}
+    endprocedure;
+    
+    
+    procedure CnstrTrp;
+      variable tmp l;
+      variable ll 1; variable lr 1; variable cnt 1; variable pntb 1;
+      {     
+      if (ip>1)*(ip<np);
+        ll := lcls|((ip-1)*mx)+1; lr := lcls|(ip*mx);
+      elseif ip=np;
+        if np#1;
+          ll := lcls|((ip-1)*mx)+1; 
+        elseif np=1;
+          ll := 1;
+        endif;
+          lr := lcls|ncls;
+      elseif ip=1;
+        ll := 1;
+        lr := lcls|mx;  
+      endif;
+      }
+      
+      tmp := ncls-(mx-1)*np;
+      if (ip>1)*(ip<np);        
+        if ip<tmp+1;
+          ll := lcls|((ip-1)*mx)+1; lr := lcls|(ip*mx);
+        elseif ip>tmp;
+          ll := lcls|(tmp*mx+(ip-tmp-1)*(mx-1))+1; 
+          lr := lcls|(tmp*mx+(ip-tmp)*(mx-1));
+        endif;      
+      elseif ip=np;
+         if np#1;
+           if ip>tmp;
+             ll := lcls|(tmp*mx+(ip-tmp-1)*(mx-1))+1; 
+           elseif 1=1;
+             ll := lcls|((ip-1)*mx)+1; 
+           endif;         
+        elseif np=1;
+          ll := 1;
+        endif;
+          lr := lcls|ncls;        
+      elseif ip=1;
+        ll := 1;
+        lr := lcls|mx;  
+      endif;
+      
+      
+      
+
+      cnt := lr-ll+1;
+      trp := cnt&lb|(ll&lr); {write 6 ll&lr&cnt;}
+      pntb := trp|(cnt+1);
+    
+     
+      while boxp|pntb>1;
+        pntb := boxp|pntb;
+        trp := trp&pntb;
+        velset trp 1 trp|1+1;
+      endwhile;
+      
+      {
+      if ip<np;
+        ll := (ip-1)*mx+1;
+        lr := ip*mx;
+      elseif ip=np;
+        ll := (ip-1)*mx+1;
+        lr := ncls;
+      endif;
+      }
+      
+      if ip<(tmp+1);
+        ll := (ip-1)*mx+1;
+        lr := ip*mx;
+      elseif 1=1;
+        ll := (tmp*mx+(ip-tmp-1)*(mx-1))+1; 
+        lr := (tmp*mx+(ip-tmp)*(mx-1));
+      endif;
+      
+      
+      strp := scls|(ll&lr)-scls|ll;
+      
+     { if ip=2; write 6 strp|77&(scls|305-scls|228)&(scls|305-scls|229); endif;}
+    endprocedure;
+    
+      
+    procedure CnstrLtrp trp sizep ltrp;
+      variable i 1; variable pntbp 1; 
+      
+      function searchtrp pntbp start;
+        variable i 1;
+        {
+        searchtrp := 1;
+        loop i start trp|1+1;
+          if (trp|i)=pntbp; searchtrp := i; endif;
+        endloop;  
+        }
+        
+      if pntbp>1;
+        i := start; 
+        while trp|i#pntbp;
+          i := i+1;
+        endwhile;        
+      elseif pntbp=1;
+        i := 1;
+      endif;
+      searchtrp := i;
+      endfunction; 
+      
+      create_vector sizep ltrp;
+      loop i 2 trp|1+1;
+        pntbp := (trp|i);
+        pntbp := boxp|pntbp;
+        if sizep>1e5; scrlen sizep;
+          pntbp := searchtrp(pntbp,i+1);
+          scrlen 1e5;
+        elseif 1=1;
+          pntbp := searchtrp(pntbp,i+1);
+        endif;
+        velset ltrp i pntbp;
+      endloop;
+    endprocedure; 
+ 
+ 
+ 
+    procedure multipole;
+      variable lBox ncls;
+      variable nBox 1;         { no. of boxes to treat }
+      variable nBoxp 1;        { no. of boxes to treat in each process}
+      variable lvl 1;          { deepest level of the tree structure}
+      {
+      variable rcdL nint(log(sizebox)/log(2))+1;     
+      }      
+      variable rcdL 100;
+                               { index of the last element for each level}
+      
+      variable i 1;          { count }
+      variable j 1;          { count }
+       
+   Procedure getmltp cx cy cz x y z m; 
+     variable sx 1; variable sy 1; variable sz 1;
+     sx := x-cx; sy := y-cy; sz := z-cz; 
+     m := sqr(da(1))+sqr(da(2))+sqr(da(3));
+     m := 1/sqrt(1+(sx*sx+sy*sy+sz*sz)*m-2*sx*da(1)-2*sy*da(2)-2*sz*da(3));
+   endprocedure;
+  
+   procedure m2m x y z m r;    
+    r :=sqr(da(1))+sqr(da(2))+sqr(da(3));
+    r := 1/(1+(x*x+y*y+z*z)*r+2*x*da(1)+2*y*da(2)+2*z*da(3));   
+    m(1) := (da(1)+x*(sqr(da(1))+sqr(da(2))+sqr(da(3))))*r;
+    m(2) := (da(2)+y*(sqr(da(1))+sqr(da(2))+sqr(da(3))))*r;
+    m(3) := (da(3)+z*(sqr(da(1))+sqr(da(2))+sqr(da(3))))*r;  
+  endprocedure;  
+  
+   procedure calcMltp i;
+     variable cx 1; variable cy 1; variable cz 1;
+     variable nx 1; variable ny 1; variable nz 1;
+     
+     variable tmap sizeda; variable mchld sizeda 1;
+     variable trans sizeda 3; variable pntb 1;
+     variable pp 1; variable cid 1;
+     
+     loop pntb rcdL|(i-1)+1 rcdL|i;
+       mltp(pntb) := 0;
+       cx := boxcx|pntb; cy := boxcy|pntb; cz := boxcz|pntb;
+       if box|pntb=0;
+         cid := idx|pntb;  
+         loop j 1 nidx|pntb;
+           nx := scx|cid; ny := scy|cid; nz := scz|cid;
+           cid := link|cid;
+           getmltp cx cy cz nx ny nz tmap;
+           mltp(pntb):= mltp(pntb)+tmap;
+         endloop;
+       elseif lo(1);
+         loop j box|pntb box|pntb+nchld|pntb-1; 
+           if type(mltp(j))=8;
+             mchld(1) := mltp(j); 
+             nx := cx-boxcx|j; ny := cy-boxcy|j; nz := cz-boxcz|j;
+             m2m nx ny nz trans tmap;           
+             POLVAL 1 mchld 1 trans 3 mchld 1;   
+             mltp(pntb) := mltp(pntb)+mchld(1)*sqrt(tmap); 
+           endif;              
+         endloop;
+       endif;       
+     endloop;
+   endprocedure; 
+   
+   procedure calcMltpp l nbox nBoxp;
+     variable mltpp sizeda nBoxp np; 
+     
+     variable cx 1; variable cy 1; variable cz 1;
+     variable nx 1; variable ny 1; variable nz 1;
+     
+     variable tmap sizeda; variable mchld sizeda 1;
+     variable trans sizeda 3; variable pntb 1;
+     variable pp 1; variable cid 1;
+     variable ni 1; variable si 1;
+     variable i 1; 
+
+     if ip>nbox-(nboxp-1)*np;
+       ni := nboxp-1;
+       si := nbox-(np-ip+1)*(nboxp-1);
+     elseif lo(1);
+       ni := nboxp;
+       si := (ip-1)*nboxp;
+     endif;  
+     
+     
+     ploop pp 1 np;
+       loop i 1 ni;
+         pntb := rcdL|(l-1)+i+si;  {write 6 i&si&pntb;}
+         mltpp(i,ip):= 0;
+         cx := boxcx|pntb; cy := boxcy|pntb; cz := boxcz|pntb;
+         if box|pntb=0;
+            cid := idx|pntb;  
+            loop j 1 nidx|pntb;
+              nx := scx|cid; ny := scy|cid; nz := scz|cid;
+              cid := link|cid;
+              getmltp cx cy cz nx ny nz tmap;
+              mltpp(i,ip):= mltpp(i,ip)+tmap;
+            endloop; 
+          elseif lo(1);
+            loop j box|pntb box|pntb+nchld|pntb-1; 
+              if type(mltp(j))=8;
+                mchld(1) := mltp(j); 
+                nx := cx-boxcx|j; ny := cy-boxcy|j; nz := cz-boxcz|j;
+                m2m nx ny nz trans tmap;           
+                POLVAL 1 mchld 1 trans 3 mchld 1;   
+                mltpp(i,ip) := mltpp(i,ip)+mchld(1)*sqrt(tmap); 
+              endif;              
+            endloop;
+          endif;            
+       endloop;
+     endploop mltpp; 
+
+     loop pp 1 np;
+       if pp>nbox-(nboxp-1)*np;
+         ni := nboxp-1;
+         si := nbox-(np-pp+1)*(nboxp-1);
+       elseif lo(1);
+         ni := nboxp;
+         si := (pp-1)*nboxp;
+       endif;  
+       
+       loop i 1 ni;
+         pntb := rcdL|(l-1)+i+si;
+         mltp(pntb) := mltpp(i,pp);
+       endloop;
+     endloop;     
+     
+     
+   endprocedure;   
+    
+    create_vector 100 rcdL;
+    {
+    create_vector nint(log(sizebox)/log(2))+1 rcdL;
+    }
+    lvl := 1;
+    velset rcdL 1 1;
+    
+    i := 0;    
+    while i<sizebox;
+      i := rcdL|lvl;
+      while box|i=0;
+        i := i-1;
+      endwhile;
+      i := box|i+nchld|i-1;
+      lvl := lvl+1; 
+      velset rcdL lvl i;
+    endwhile;
+    
+    {
+    write 6 rcdL;
+    write 6 lvl&sizebox;
+    quit 0;
+    }
+    
+    loop i lvl 2 -1;
+      nbox := rcdL|i-rcdL|(i-1);
+      if nbox>np-1;
+        nBoxp := int(nBox/np);
+        if nBoxp<(nBox/np);
+          nBoxp := nBoxp+1;
+        endif;
+        calcMltpp i nbox nBoxp;
+      elseif lo(1);
+        calcMltp i;
+      endif;   
+    endloop;
+  endprocedure; 
+ 
+     
+    procedure CalSizepSizepp;
+      variable i 1; variable tmp 1; variable pntb 1; variable cmp 1;
+      
+      sizep := lcls|mx; pntb := lb|sizep;
+      while boxp|pntb>1;
+        sizep := sizep+1;
+        pntb := boxp|pntb;
+      endwhile;
+      
+     { 
+     sizepp := nptcl; 
+     if np>1;
+      sizepp := scls|(mx+1);
+      loop i 2 np-1;        
+        tmp := lcls|(i*mx); pntb := lb|tmp;
+        tmp := tmp-lcls|(i*mx-mx);
+        while boxp|pntb>1;
+          tmp := tmp+1;
+          pntb := boxp|pntb;
+        endwhile;
+        if tmp>sizep; sizep := tmp; endif;
+        tmp := scls|(i*mx+1)-scls|(i*mx-mx+1); 
+        if tmp>sizepp; sizepp := tmp; endif;
+      endloop;
+      tmp := lcls|ncls; pntb := lb|tmp;
+      tmp := tmp-lcls|(np*mx-mx);
+      while boxp|pntb>1;
+        tmp := tmp+1;
+        pntb := boxp|pntb;
+      endwhile;
+      if tmp>sizep; sizep := tmp; endif;
+      tmp := nptcl-scls|(np*mx-mx+1); 
+      if tmp>sizepp; sizepp := tmp; endif;
+     endif;  
+     sizep := sizep+1;
+     
+     }
+     {write 6 '*' sizep&sizepp;}
+     
+     
+     sizepp := nptcl;
+     if np>1;
+       sizepp := scls|(mx+1);
+       
+       cmp := ncls-(mx-1)*np;
+       loop i 2 np;
+         if i<(cmp+1);
+            tmp := lcls|(i*mx); pntb := lb|tmp;
+            tmp := tmp-lcls|(i*mx-mx);
+            while boxp|pntb>1;
+              tmp := tmp+1;
+              pntb := boxp|pntb;
+            endwhile;
+            if tmp>sizep; sizep := tmp; endif;
+            if i<np;
+              tmp := scls|(i*mx+1)-scls|(i*mx-mx+1); 
+            elseif i=np;
+              tmp := nptcl-scls|(i*mx-mx+1); 
+            endif;
+            if tmp>sizepp; sizepp := tmp; endif;
+         elseif 1=1;
+            tmp := lcls|(cmp*mx+(i-cmp)*(mx-1)); pntb := lb|tmp;
+            tmp := tmp-lcls|(cmp*mx+(i-cmp-1)*(mx-1));
+            while boxp|pntb>1;
+              tmp := tmp+1;
+              pntb := boxp|pntb;
+            endwhile;
+            if tmp>sizep; sizep := tmp; endif;
+            if i<np;
+              tmp := scls|(cmp*mx+(i-cmp)*(mx-1)+1)
+                                 -scls|(cmp*mx+(i-cmp-1)*(mx-1)+1); 
+            elseif i=np;
+              tmp := nptcl-scls|(cmp*mx+(i-cmp-1)*(mx-1)+1); 
+            endif;              
+            if tmp>sizepp; sizepp := tmp; endif;
+         endif;
+       endloop;     
+     endif;
+     sizep := sizep+1;
+     
+    endprocedure; 
+ 
+ 
+    function sep bbs bcx bcy bcz pntw;
+    {
+    bbs : box size of box b;
+    bcx bcy bcz: center of box b;
+    pntw: index of box w;
+    
+    if sep=1; box b and w are well separated.
+    if sep=0; box b and w are adjacent.
+    if sep=2; box b and w are ill separated.
+    }
+    variable wcx 1; variable wcy 1; variable wcz 1; variable wbs 1;
+    variable cc 1; variable lbs 1; variable sbs 1;
+    
+    wcx := boxcx|pntw; wcy := boxcy|pntw; wcz := boxcz|pntw;
+    wbs := bs*0.5^(boxl|pntw);
+    
+    lbs := bbs; sbs := wbs;
+    if wbs>bbs; lbs := wbs; sbs := bbs; endif;
+    
+    
+    wcx := abs(wcx-bcx);
+    wcy := abs(wcy-bcy);
+    wcz := abs(wcz-bcz);
+    
+    sep := 0;
+         
+    {cc := (0.5+1e-6)*sbs+nbr*lbs;}
+    cc := (0.5+nbr)*lbs;
+    
+    if (wcx>cc)+(wcy>cc)+(wcz>cc);
+      sep := 1;
+    elseif 1=1;
+      {cc := (0.5+1e-6)*lbs+nbr*sbs;}
+      cc := 0.5*lbs+nbr*sbs;
+      if (wcx>cc)+(wcy>cc)+(wcz>cc);
+        sep := 2;
+      endif;
+    endif;
+       
+  endfunction;
+ 
+  procedure createclg clg trp ltrp;
+  
+  variable i 1;  variable j 1;
+  variable pntb 1; variable tclg (2*nbr+1)^3+1;   variable pntc 1;
+  variable cb 1; variable cw 1; variable cnt 1; variable pntp 1;
+  variable bbs 1; variable bcx 1; variable bcy 1; variable bcz 1;
+  
+  create_vector (2*nbr+1)^3+1 tclg;
+  velset tclg 1 1; velset tclg 2 1;
+  clg(1) := tclg;
+  {
+  velset tclg 1 st(2)-1;
+  loop i 2 st(2);
+    velset tclg i i;
+  endloop;
+  
+  loop i 2 st(2);
+    clg(i) := tclg;
+  endloop; 
+  }
+  loop j trp|1+1 2 -1;
+  
+    cnt := 1;
+    pntb := trp|j; 
+   if nchld|pntb>0; 
+    bcx := boxcx|pntb; bcy := boxcy|pntb; bcz := boxcz|pntb;
+    bbs := bs*0.5^(boxl|pntb);
+    
+    pntp := ltrp|j;
+    
+    loop i 2 clg(pntp)|1+1;
+      pntc := clg(pntp)|i;
+      if boxl|pntc<boxl|pntb;
+        if nchld|pntc=0;
+           if sep(bbs,bcx,bcy,bcz,pntc)=0; 
+             cnt := cnt+1;         
+             velset tclg cnt pntc;           
+           endif;        
+        elseif 1=1;
+          loop pntc box|pntc box|pntc+nchld|pntc-1;
+            if sep(bbs,bcx,bcy,bcz,pntc)=0;
+              cnt := cnt+1;
+              velset tclg cnt pntc;            
+            endif;
+          endloop;
+        endif;
+      elseif (sep(bbs,bcx,bcy,bcz,pntc)=0)+(sep(bbs,bcx,bcy,bcz,pntc)=2);  
+         cnt := cnt+1;         
+         velset tclg cnt pntc;           
+      endif;      
+    endloop;
+    cnt := cnt-1;
+    velset tclg 1 cnt;
+    clg(j) := tclg;
+   endif;  
+  endloop;
+  endprocedure; 
+
+  
+    procedure local sz;
+       variable clg (2*nbr+1)^3+1 sz;
+       variable pex sizepp;
+       variable pey sizepp;
+       variable pez sizepp;
+       variable localp sizeda sz;
+       variable lchldless sz;
+       variable cnt 1;
+ 
+       variable i 1; variable j 1;
+  {     
+       procedure CnstrLchldless;
+         variable i 1; variable cnt 1; variable pntb 1;
+         
+         create_vector trp(ip)|1+1 lchldless;
+         cnt := 1; 
+         loop i 2 trp(ip)|1+1;
+           pntb := trp(ip)|i;
+           if nchld|pntb=0;
+             velset lchldless i cnt;
+             cnt := cnt+1;
+           endif;  
+         endloop;
+       endprocedure;
+ 
+ }
+     procedure findptcl pntb tx ty tz;
+      variable nt 1; variable pntid 1; variable i 1;
+      nt := nidx|pntb;
+      if nt>1;
+        create_vector nt tx; ty := tx; tz := tx;
+        pntid := idx|pntb;
+        loop i 1 nt;
+         {if pntid=12245; write 6 pntb&ip&j&i; quit 0; endif; }
+         { if pntid=(2*npp+1458); write 6 pntb&ip&j&i; quit 0; endif;}
+         { if pntb=8; write 6 'findptcl' scx|pntid&scy|pntid; endif;}
+         
+         { if pntid=1; write 6 'pntb ip i: ' pntb&ip&i; endif;}
+         
+          velset tx i scx|pntid;
+          velset ty i scy|pntid;
+          velset tz i scz|pntid;
+          pntid := link|pntid;
+        endloop;
+      elseif nt=1;
+        pntid := idx|pntb;
+        tx := scx|pntid; ty := scy|pntid; tz := scz|pntid; 
+      endif;
+    endprocedure;
+ 
+
+       procedure escfield x y z pntb ll ex ey ez;
+          variable xd ll; variable yd ll; variable zd ll; variable den ll;
+          variable i 1;  variable rm 1; variable j 1;
+		  
+		  rm := rate*2*2^(l-boxl|pntb)/ll^(1/3);
+		  {
+		  write 6 'check rm: rate l pntb boxl ll rm' rate&l&pntb&boxl|pntb&ll&rm;
+		  write 6 '';
+		  }
+          ex := 0*x; ey := ex; ez := ex;
+          if ll>1;
+            loop i 1 ll; 
+              xd := x-x|i; yd := y-y|i; zd := z-z|i;
+              den := xd*xd+yd*yd+zd*zd;   den := den*sqrt(den);
+			  velset den i 1+rm; 
+			  if vmin(den)<rm^3;
+				loop j 1 ll;
+					if den|j<rm^3;
+						{write 6 den|j&rm^3;}
+						velset den j (den|j)^(1/3)*rm*rm;
+					endif;
+				endloop;
+			  endif;		
+              
+              ex := ex+xd/den; ey := ey+yd/den; ez := ez+zd/den;
+            endloop;
+          endif;
+       endprocedure;
+ 
+ 
+       function tlist pntb bbs bcx bcy bcz pntw; 
+  {
+  tlist=1: type1V
+  tlist=2: type2X
+  tlist=3: type3W
+  tlist=4: type4U
+  tlist=5: type5Y
+  tlist=6: type6DC
+  tlist=7: type7DB
+  }
+  
+  variable sp 1;
+  tlist := 5;
+  
+  sp:=sep(bbs,bcx,bcy,bcz,pntw);
+  
+  if sp=1;
+    tlist := 1;
+  elseif sp=2;
+    if boxl|pntb>boxl|pntw;
+      if nchld|pntw=0; 
+        tlist := 2; 
+      elseif 1=1;
+        tlist := 6;
+      endif;
+    elseif 1=1;
+      if nchld|pntb=0;
+        tlist := 3;
+      elseif 1=1;
+        tlist := 7;
+      endif;
+    endif;   
+  elseif sp=0;
+    if nchld|pntb=0;
+      if nchld|pntw=0; tlist := 4; elseif 1=1; tlist := 6; endif;
+    endif;
+  endif;
+  
+  
+  
+  endfunction;   
+
+         
+     
+    procedure type1V pntp bcx bcy bcz pntc;
+      variable ccx 1; variable ccy 1; variable ccz 1;
+      variable mapv sizeda; variable trans sizeda 3; variable mapc sizeda 1;
+      
+      
+      
+      procedure m2l x y z m v;
+         v := 1/(sqr(x+da(1))+sqr(y+da(2))+sqr(z+da(3)));
+         m(1) := (x+da(1))*v;
+         m(2) := (y+da(2))*v;
+         m(3) := (z+da(3))*v;
+      endprocedure;
+      
+      ccx := bcx-boxcx|pntc; ccy := bcy-boxcy|pntc; ccz := bcz-boxcz|pntc; 
+      m2l ccx ccy ccz trans mapv; 
+      mapc(1) := mltp(pntc); 
+      {if type(mltp(pntc))#8;write 6 pntc&type(mltp(pntc));endif;}
+      polval 1 mapc 1 trans 3 mapc 1;
+      localp(pntp) := localp(pntp)+mapc(1)*sqrt(mapv);      
+    endprocedure;
+
+     procedure type2X pntp bcx bcy bez pntc;
+      variable pntid 1; variable i 1; variable tmap sizeda; 
+      variable maplcl sizeda;
+      {
+      variable cex ns; variable cey ns;
+      
+       Procedure L2C pntb bcx bcy tx ty tex tey;
+       variable tmfld sizeda 2; variable txyz ns 2; variable tmap sizeda;
+        tmap := pntb; 
+        tmfld(1) := -der(1,tmap);
+        tmfld(2) := -der(2,tmap);
+ 
+        txyz(1) := tx-bcx;
+        txyz(2) := ty-bcy;
+ 
+        polval 1 tmfld 2 txyz 2 txyz 2;
+        tex := tex+txyz(1); tey := tey+txyz(2); 
+        
+      endprocedure; 
+      }
+      pntid := idx|pntc;
+      maplcl := 0;
+      loop i 1 nidx|pntc;
+        tmap := sqr(scx|pntid-bcx-da(1))+sqr(scy|pntid-bcy-da(2))
+                                               +sqr(scz|pntid-bcz-da(3));
+        maplcl := maplcl+1/sqrt(tmap);
+        pntid := link|pntid;
+      endloop;
+      
+      localp(pntp) := localp(pntp)+maplcl;
+      {
+      if pntb=cpn;
+        write 6 'compre 2x with 4u';
+        type4U pntb tx ty pntc cex cey; 
+        write 6 cex|1&cey|1;
+        cex := 0*cex; cey :=0*cey;
+        L2C maplcl bcx bcy tx ty cex cey;
+        write 6 cex|1&cey|1;
+      endif;
+      }
+    endprocedure;
+      
+    procedure tpye3W pntb tx ty tz pntc tex tey tez;
+     variable txyz nidx|pntb 3; variable tdr nidx|pntb 1;
+     variable tmfld sizeda 3; variable tt nidx|pntb 1; variable ttt nidx|pntb 3; 
+     variable ccx 1; variable ccy 1; variable ccz 1; variable map2 sizeda 1;
+
+     
+     ccx := boxcx|pntc; ccy := boxcy|pntc; ccz := boxcz|pntc; 
+     
+     txyz(1) := tx-ccx; txyz(2) := ty-ccy; txyz(3) := tz-ccz;
+                  
+         tdr(1) := txyz(1)*txyz(1)+txyz(2)*txyz(2)+txyz(3)*txyz(3);
+         tdr(1) := 1/tdr(1);
+         txyz(1) := txyz(1)*tdr(1);
+         txyz(2) := txyz(2)*tdr(1); txyz(3) := txyz(3)*tdr(1);
+         tdr(1) := sqrt(tdr(1));
+         
+         
+         map2(1) := mltp(pntc);         
+         tmfld(1) := der(1,map2(1));
+         tmfld(2) := der(2,map2(1));tmfld(3) := der(3,map2(1));
+         
+         
+         polval 1 map2 1 txyz 3 tt 1; 
+         polval 1 tmfld 3 txyz 3 ttt 3;
+         tex := tex-tdr(1)*ttt(1)*(tdr(1)*tdr(1)-2*txyz(1)*txyz(1));
+         tex := tex+tdr(1)*ttt(2)*2*txyz(1)*txyz(2);
+         tex := tex+tdr(1)*ttt(3)*2*txyz(1)*txyz(3);
+         tex := tex+tt(1)*txyz(1)*tdr(1);
+                  
+         tey := tey+tdr(1)*ttt(1)*2*txyz(1)*txyz(2); 
+         tey := tey-tdr(1)*ttt(2)*(tdr(1)*tdr(1)-2*txyz(2)*txyz(2));
+         tey := tey+tdr(1)*ttt(3)*2*txyz(2)*txyz(3);
+         tey := tey+tt(1)*txyz(2)*tdr(1);  
+         
+         tez := tez+tdr(1)*ttt(1)*2*txyz(1)*txyz(3);
+         tez := tez+tdr(1)*ttt(2)*2*txyz(2)*txyz(3);
+         tez := tez-tdr(1)*ttt(3)*(tdr(1)*tdr(1)-2*txyz(3)*txyz(3));
+         tez := tez+tt(1)*txyz(3)*tdr(1);
+         
+
+   endprocedure;
+   
+    procedure escfield2 x y z pntb ll sx sy sz ex ey ez;
+      variable xd ll; variable yd ll; variable zd ll; variable den ll; 
+	  variable rm 1; variable j 1;
+	    rm := rate*2*2^(l-boxl|pntb)/ll^(1/3);
+        xd := x-sx; yd := y-sy; zd := z-sz;
+        den := xd*xd+yd*yd+zd*zd;   den := den*sqrt(den);
+		if ll>1;
+			if vmin(den)<rm^3;
+				loop j 1 ll;
+					if den|j<rm^3;
+						{write 6 den|j&rm^3;}
+						velset den j (den|j)^(1/3)*rm*rm;
+					endif;
+				endloop;
+			  endif;
+		elseif ll=1;
+			if den<rm^3;
+				{write 6 den|j&rm^3;}
+				den := (den)^(1/3)*rm*rm;
+			endif;
+		endif;
+        ex := ex+xd/den; ey := ey+yd/den; ez := ez+zd/den;
+    endprocedure;
+    
+   
+    Procedure type4U pntb tx ty tz pntc bex bey bez; 
+      variable pntid 1; variable i 1; variable nt 1;
+      if pntb#pntc;
+      nt := nidx|pntc;
+      pntid := idx|pntc;
+      loop i 1 nt;
+        escfield2 tx ty tz pntb nidx|pntb scx|pntid scy|pntid scz|pntid bex bey bez;
+        pntid := link|pntid;
+      endloop;    
+      endif;
+    endprocedure;
+       
+    Procedure type6DC pntb pntp bbs bcx bcy bcz tx ty tz pntc bex bey bez;
+     variable stack 1 sizebox-pntc; 
+     variable pnt 1; variable i 1; variable typ 1; variable j 1;
+     
+     pnt := nchld|pntc; 
+     loop i 1 pnt;
+       stack(i) := box|pntc+i-1;
+     endloop;
+     
+     while pnt>0;
+       pntc := stack(pnt); 
+       
+       typ := tlist(pntb,bbs,bcx,bcy,bcz,pntc); 
+       if typ=1;
+         type1V pntp bcx bcy bcz pntc; pnt := pnt-1;
+       elseif typ=2; 
+         type2X pntp bcx bcy bcz pntc; pnt := pnt-1;
+       elseif typ=6;
+         loop j 1 nchld|pntc;
+           stack(pnt) := box|pntc+j-1;
+           pnt := pnt+1;
+         endloop;
+         pnt := pnt-1;
+       elseif typ=3; 
+         tpye3W pntb tx ty tz pntc bex bey bez; pnt := pnt-1;
+       elseif typ=4; 
+         type4U pntb tx ty tz pntc bex bey bez;  pnt := pnt-1;         
+       endif;
+     endwhile;
+          
+   endprocedure;
+   
+    
+    procedure local_from_parent pntp bcx bcy bcz;
+        variable tmap sizeda; variable pntbp 1; variable a 1 3;
+        variable c 1 3;
+        
+        pntbp := ltrp|pntp;
+        tmap := localp(pntbp);
+        {
+        if pntp=1075;
+          write 6 trp|pntp;
+          write 6 localp(pntp);
+          quit 0;
+        endif;  
+        }
+        {
+        if pntbp=1076;
+          write 6 'pntbp: '&si(pntbp);
+          write 6 tmap;
+          quit 0;
+        endif;
+        }
+        if type(tmap)=8;
+          pntbp := trp|pntbp;        
+          a(1) := 1; a(2) := 1; a(3) := 1;        
+          c(1) := bcx-boxcx|pntbp; c(2) := bcy-boxcy|pntbp; 
+          c(3) := bcz-boxcz|pntbp; 
+          datrn tmap a c 1 3 tmap;
+          localp(pntp) := localp(pntp)+tmap;
+        endif;
+        
+        {if pntb=cpn; write 6 'lcl from parent';
+           write 6 pntb&pntbp&type(tmap);
+         endif;}
+    endprocedure;
+   
+    procedure L2C pntb pntp bcx bcy bcz tx ty tz tex tey tez;
+       variable tmfld sizeda 3; variable txyz nidx|pntb 3; variable tmap sizeda;
+        tmap := localp(pntp); 
+        tmfld(1) := -der(1,tmap);
+        tmfld(2) := -der(2,tmap); tmfld(3) := -der(3,tmap);
+ 
+        txyz(1) := tx-bcx;
+        txyz(2) := ty-bcy; txyz(3) := tz-bcz;
+ 
+        polval 1 tmfld 3 txyz 3 txyz 3;
+        tex := tex+txyz(1); tey := tey+txyz(2); tez := tez+txyz(3); 
+    endprocedure; 
+    
+    procedure sequence pntb pntp tex tey tez;
+        variable pts 1; variable i 1; variable j 1; 
+ 
+        pts := nidx|pntb;
+        
+        {j := (lchldless|pntp-1)*ns;}
+        j := strp|pntp; {write 6 pntp&strp|pntp&pts;}
+        
+       { if pntb=6694; write 6 'j&ip:' j&ip; 
+         write 6 tex|1&tey|1&tez|1;        endif;}
+        
+      {  if pntb=3287; write 6 pts&lchldless|pntp&j; endif;}
+        if pts>1;          
+          loop i 1 pts; 
+            velset pex j+i tex|i;
+            velset pey j+i tey|i;
+            velset pez j+i tez|i; 
+          endloop;
+        elseif pts=1;
+          velset pex j+1 tex;
+          velset pey j+1 tey;
+          velset pez j+1 tez; 
+        endif;
+      endprocedure;
+      
+      
+    
+    
+    
+    procedure distribute pex pey pez;
+      variable i 1;
+      variable fld sizepp np;
+      
+      variable vj np; variable vidp npp; variable vlink npp;
+        
+      variable time1 1; variable time2 1;
+      
+      procedure distr fld ex npp;
+        variable i 1; variable j 1;  variable k 1;
+        variable up 1; variable low 1; variable id 1; variable idp 1;
+        variable pntb 1; 
+        variable vfld sizepp; 
+        variable cmp 1; variable cnt 1;
+        variable getn 1 np;
+        
+        ploop i 1 np;
+          getn(i) := n;
+        endploop getn;
+        
+        low := 0; up := getn(1)+1;
+        loop i 2 ip;
+          up := up+getn(i);
+          low := low+getn(i-1);
+        endloop;
+        {
+        cmp := (nptcl-(npp-1)*np);
+        
+        if ip<(cmp+1);
+          up := ip*npp+1; low := (ip-1)*npp;
+        elseif 1=1;
+          up := cmp*npp+(ip-cmp)*(npp-1)+1;
+          low := cmp*npp+(ip-cmp-1)*(npp-1);
+        endif;
+        }
+        {if ip=1; write 6 'up&low:' up&low; endif;}
+        
+        
+        cmp := ncls-(mx-1)*np;
+        j := 1; vfld := fld(j); cnt := 0;
+        loop i 1 ncls;
+         if j<(cmp+1); 
+          if int(i/mx)>(j-1); 
+            {write 6 i&mx&int(i/mx)&j; }
+            if int(i/mx)#(i/mx);
+              if j>1;
+              { if ip=1; write 6 j&vj|(j-1); endif;}
+               if cnt>vj|(j-1);
+               velset vj j cnt;
+               endif;
+             elseif lo(1);
+               velset vj j cnt;
+             endif;
+            {
+              if np>1; velset vj j idp;
+              elseif np=1; vj := idp;
+              endif;
+              }
+              j:=j+1; vfld := fld(j); 
+            endif;  
+          endif;
+         elseif 1=1;
+           if cmp+int((i-mx*cmp)/(mx-1))>(j-1);
+             if int((i-mx*cmp)/(mx-1))#((i-mx*cmp)/(mx-1));
+               if j>1;
+               {if ip=1; write 6 j&vj|(j-1); endif; }
+               if cnt>vj|(j-1);
+               velset vj j cnt;
+               endif;
+             elseif lo(1);
+               velset vj j cnt;
+             endif;
+               j := j+1; vfld := fld(j);
+             endif;
+           endif;
+         endif;         
+          
+          pntb := lb|(lcls|i);
+          id := idx|pntb;
+          loop k 1 nidx|pntb;
+            if (id>low)*(id<up);
+              {if j=1; idp := scls|i+k;
+              elseif j>1;
+                idp := scls|i-scls|(j*mx-mx+1)+k;
+              endif;
+              }
+              if j<(cmp+1);
+                idp := scls|i-scls|(j*mx-mx+1)+k; 
+              elseif 1=1;
+                idp := scls|i-scls|(cmp*mx+(j-cmp-1)*(mx-1)+1)+k;
+              endif;
+              {if (pntb=519)*(k=6);
+                 write 6 id&(id-low)&j&idp&vfld|idp&i&mx&ncls;
+              endif;}
+              cnt := cnt+1;
+              velset ex id-low  vfld|idp; 
+              velset vidp cnt idp;
+              velset vlink cnt id-low;
+              
+             { if ip=1; if j=3; write 6 cnt; endif; endif;}
+              
+         {     if ip=2;
+               
+                if cnt=710; write 6 cnt&j&idp&id-low; endif;
+                if cnt=1232; write 6 cnt&j&idp&id-low; endif;
+                if cnt=2500; write 6 cnt&j&idp&id-low; endif;
+                
+                {
+                if (cnt<682)*(cnt>675);
+                write 6 cnt&(id-low)&idp&vfld|idp&j;
+                endif;}
+                
+              endif;
+         }     
+            endif;
+            id := link|id;
+          endloop;
+        endloop;
+        if np>1; velset vj j cnt;
+        elseif np=1; vj := cnt;
+        endif;
+        
+        {
+        loop j 1 np;
+          vfld := fld(j);
+          if j<cmp+1;
+            loop i (j-1)*mx+1 j*mx;
+              pntb := lb|(lcls|i);
+              id := idx|pntb;
+              loop k 1 nidx|pntb;
+                if (id>low)*(id<up);
+                  idp := scls|i-scls|(j*mx-mx+1)+k;
+                  velset ex id-low  vfld|idp;
+                  
+                  if (ip=1)*(id=1); 
+                     write 6 j&i&k&pntb&idp;
+                     write 6 vfld|idp;
+                  endif;
+                endif;
+                id := link|id;
+              endloop;
+            endloop;
+          elseif 1=1;
+            loop i cmp*mx+(j-cmp-1)*(mx-1)+1 cmp*mx+(j-cmp)*(mx-1);
+              pntb := lb|(lcls|i);
+              id := idx|pntb;
+              if (id>low)*(id<up);
+                idp := scls|i-scls|(cmp*mx+(j-cmp-1)*(mx-1)+1)+k;
+                velset ex id-low  vfld|idp;
+                
+                if (ip=1)*(id=1); 
+                     write 6 j&i&k&pntb&idp;
+                     write 6 vfld|idp;
+                  endif;
+              endif;
+              id := link|id;              
+            endloop;
+          endif;          
+        endloop;
+        }
+
+      endprocedure;
+      
+      
+      procedure distr2 fld ex npp;
+        variable i 1; variable j 1; variable k 1;
+        variable ii 1;
+        variable vfld sizepp; 
+        
+        k := 1;
+        loop i 1 np;
+          if np>1; j := vj|i; elseif np=1; j := vj; endif;
+          {if ip=4; write 6 i&j&k; endif;}
+          if j>0;
+            vfld := fld(i);
+            loop ii k j; 
+               velset ex vlink|ii vfld|(vidp|ii);   
+               {
+             if ip=1;
+               if (ii<682)*(ii>675);
+                 write 6 ii&vlink|ii&vidp|ii&vfld|(vidp|ii)&i;   
+               endif;
+             endif;  
+             }
+            endloop;
+            k := j+1;
+          endif;
+        endloop;
+      endprocedure;
+{
+     ploop i 1 np;
+         fld(i) := ip;
+     endploop fld;
+     loop i 1 np;
+       write 6 ip&i&fld(i);
+     endloop;
+ }    
+ 
+      create_vector np vj; create_vector npp vidp; vlink := vidp;
+      
+     
+      ploop i 1 np;
+        fld(i) := pex;
+      endploop fld; 
+      
+       
+      if sizepp>1e5; scrlen sizepp; distr fld ex npp; scrlen 1e5;
+       elseif lo(1); distr fld ex npp;
+       endif;
+     
+    
+      ploop i 1 np;
+        fld(i) := pey;
+      endploop fld; 
+     
+
+      
+       if sizepp>1e5; scrlen sizepp; distr2 fld ey npp; scrlen 1e5;
+       elseif lo(1); distr2 fld ey npp;
+       endif;
+     
+      ploop i 1 np;
+        fld(i) := pez;
+      endploop fld; 
+      
+      
+      if sizepp>1e5; scrlen sizepp; distr2 fld ez npp; scrlen 1e5;
+       elseif lo(1); distr2 fld ez npp;
+       endif;
+
+      
+      
+      
+    endprocedure;
+
+  
+    createclg clg trp ltrp;
+   
+   
+    
+    create_vector sizepp pex; pey := pex; pez := pex;
+    
+  
+    
+    if ip<ncls-(mx-1)*np+1;
+      cnt := mx;
+    elseif 1=1;
+      cnt := mx-1;
+    endif;
+    
+ 
+   loop j trp|1+1 2 -1;
+     pntb := trp|j;
+     bcx := boxcx|pntb; bcy := boxcy|pntb;  bcz := boxcz|pntb; 
+     bbs := bs*0.5^(boxl|pntb); 
+     
+     if nchld|pntb=0;
+       findptcl pntb tx ty tz; 
+       escfield tx ty tz pntb nidx|pntb bex bey bez;
+     endif;
+
+     pntpb := ltrp|j; 
+     loop i 2 clg(pntpb)|1+1;
+       pntcpb := clg(pntpb)|i; 
+         if nchld|pntcpb=0;
+           typ := tlist(pntb,bbs,bcx,bcy,bcz,pntcpb); 
+           if typ=1; type1V j bcx bcy bcz pntcpb;
+           elseif typ=2; type2X j bcx bcy bcz pntcpb;
+           elseif typ=3; tpye3W pntb tx ty tz pntcpb bex bey bez;
+           elseif typ=4; type4U pntb tx ty tz pntcpb bex bey bez;
+           endif;
+         elseif 1=1;
+           loop pntc box|pntcpb box|pntcpb+nchld|pntcpb-1;
+           typ := tlist(pntb,bbs,bcx,bcy,bcz,pntc); 
+           if typ=1; type1V j bcx bcy bcz pntc;
+           elseif typ=2; type2X j bcx bcy bcz pntc;
+           elseif typ=6;
+             type6DC pntb j bbs bcx bcy bcz tx ty tz pntc bex bey bez;
+           elseif typ=3; tpye3W pntb tx ty tz pntc bex bey bez;
+           elseif typ=4; type4U pntb tx ty tz pntc bex bey bez; 
+           endif;
+           endloop;
+         endif; 
+      endloop;  
+      
+      
+      {if pntb=835; write 6 localp(j); quit 0; endif;}
+      local_from_parent j bcx bcy bcz; 
+      
+       {if pntb=519; write 6 localp(j); endif;}
+      
+      if nchld|pntb=0;
+        {if pntb=936; write 6 localp(j); quit 0; endif;}
+        L2C pntb j bcx bcy bcz tx ty tz bex bey bez;
+        
+        {if pntb=6694; write 6 localp(j); endif;}
+        {if pntb=6694; write 6 bex|1&bey|1&bez|1; endif;}
+        {if ip=3; if j=728; 
+        write 6 'l2c field' pntb&bex|1&bey|1&bez|1; endif; endif;}
+        
+        {write 6 j&trp|1;}
+        sequence pntb cnt bex bey bez; cnt := cnt-1;
+       { if pntb=3287; write 6 pex|83911&pey|83911&pez|83911; endif;}
+       { if ip=3; if j=728; 
+        write 6 'sequece' pex|72701&pey|72701&pez|72701; endif; endif;}
+      endif;
+    
+     {if ip=1; if pntb=8511; write 6 localp(j); quit 0; endif; endif; }
+      
+   endloop;  
+   
+   {if ip=3; write 6 ip&pex|83911; endif;}
+   
+  
+   if sizepp>1e5; 
+     scrlen sizepp;
+     distribute pex pey pez;
+     scrlen 1e5;
+   elseif 1=1;
+     distribute pex pey pez;
+   endif;
+ 
+    endprocedure;
+    
+    mx := int(ncls/np);
+    if mx<ncls/np; mx := mx+1; endif;
+    
+    
+    CnstrLb; 
+    
+    
+    
+    
+    
+  
+    if sizep>1e5; scrlen sizep; 
+      CnstrTrp; scrlen sizep;
+      CnstrLtrp trp sizep ltrp; scrlen 1e5;
+    elseif 1=1;
+      CnstrTrp;
+      CnstrLtrp trp sizep ltrp;
+    endif;
+   
+    
+   
+  
+    multipole; 
+
+    CalSizepSizepp;
+    
+    {SubTreeSize sizep;}        
+    local sizep; 
+
+    
+    
+    
+    
+  endprocedure;    
+
+  procedure scalefield;
+    variable k 1; variable e 1; variable f 1;
+    K := 8.9875517874E9;
+    E := 1.60217733E-19;
+    f := 1;
+    ex := ex*scale*scale*k*e*f; ey := ey*scale*scale*k*e*f;
+    ez := ez*scale*scale*k*e*f;
+  endprocedure; 
+  
+  procedure CalSizep ncls l sizep;
+     variable i 1; variable j 1;
+     sizep := ncls; j := ncls;
+     loop i 1 l;
+       sizep := sizep+nint(j/2);
+       j := nint(j/2);
+     endloop;
+     sizep := sizep+1;
+     if sizep>sizebox; sizep:= sizebox; endif;
+   endprocedure; 
+   
+  setzero;
+   
+  
+
+ 
+  pnpp := length(x);
+  {
+ if ip=1; write 6 'start cutting box'; endif;
+  pwtime time1;
+  }
+  pcuttingbox3d;
+ { 
+ pwtime time2;
+ }
+ if sign=1; 
+ {
+ if ip=1; write 6 'finish cutting box'; endif;
+ if ip=1; write 6 'cutting box cost time:'&s(time2-time1); endif;
+ }
+  if npp>1e5; scrlen npp; scalexyz; scrlen 1e5;
+  elseif 1=1; scalexyz;
+  endif;
+  
+  if nptcl>1e5; scrlen nptcl;  gatherxyz scx scy scz scx scy scz; scrlen 1e5; 
+  elseif 1=1; gatherxyz scx scy scz scx scy scz;
+  endif;
+  
+  
+  
+  
+  
+ { sizep := nint(st(l)/np+0.5)+l+1;}
+  
+  CalSizep ncls l sizep; {write 6 sizep;}
+  
+  field sizep;
+  
+  if npp>1e5; scrlen npp; scalefield; scrlen 1e5;
+  elseif 1=1; scalefield;
+  endif;
+ endif;
+  
+  
+  
+  
+endprocedure;  
+
+procedure runspacecharge  npp n np nptcl ns noda nvda rate x y z ex ey ez;
+  variable sign 1; variable sizebox 1; variable sizeidx 1;
+  variable sizeda 1;
+   
+  procedure size nptcl ns noda nvda sizebox sizeidx sizeda;
+  variable i 1; variable n 1;
+  
+    
+  function factorial n;
+    variable i 1;
+    factorial := 1;
+    loop i 1 n;
+      factorial := factorial*i;
+    endloop;
+  endfunction; 
+
+  sizeidx := nint(2*nptcl/ns);
+  n := nint(log(sizeidx)/log(4)+0.5);
+  sizebox := 0;
+  loop i 0 n;
+    sizebox := sizebox + sizeidx/8^i;
+  endloop;
+  sizebox := 2*nint(sizebox);
+
+  sizeda := factorial(noda+nvda)/(factorial(noda)*factorial(nvda));
+  {sizexb := factorial(noda+2*nvda)/(factorial(noda)*factorial(2*nvda));}
+  
+endprocedure;      
+
+size nptcl ns noda nvda sizebox sizeidx sizeda;
+sign := 0;
+while sign<1;
+  sign := 1;
+  scrlen 1e5;
+spacecharge 
+         sign npp n np nptcl ns noda nvda sizebox sizeidx sizeda rate x y z ex ey ez;
+  if sign=0;
+    sizebox := nint(sizebox*1.5);
+    {if ip=1; write 6 'reevaluate sizebox :'&s(sizebox); endif;}
+  endif;  
+endwhile;  
+endprocedure;  
+
+procedure CoulombField mnpp n x y z ex ey ez;
+  variable pxyz mnpp 3 np; variable pnpp 1 np;
+  variable dx mnpp; variable dy mnpp; variable dz mnpp; 
+  variable dr mnpp;
+  variable i 1; variable j 1; variable k 1; variable e 1;
+  
+  ploop i 1 np;
+    pxyz(1,i) := x;
+    pxyz(2,i) := y;
+    pxyz(3,i) := z;
+    {
+    loop j 1 3;
+      pxyz(j,i) := x(j);
+    endloop;
+    }
+    pnpp(i) := n;
+  endploop pxyz pnpp;   
+
+  ex := 0*x; ey := ex; ez := ex;
+  
+  loop j 1 np;
+    if j#ip;
+      loop i 1 pnpp(j);
+      {
+        dx := x(1)-pxyz(1,j)|i; dy := x(2)-pxyz(2,j)|i; dz := x(3)-pxyz(3,j)|i;
+      } 
+        if pnpp(j)>1;
+           dx := x-pxyz(1,j)|i; dy := y-pxyz(2,j)|i; dz := z-pxyz(3,j)|i;
+        elseif pnpp(j)=1;
+           dx := x-pxyz(1,j); dy := y-pxyz(2,j); dz := z-pxyz(3,j);
+        endif;        
+        dr := dx*dx+dy*dy+dz*dz;
+        dr := sqrt(dr)*dr;
+        ex := ex+dx/dr; ey := ey+dy/dr; ez := ez+dz/dr; 
+      endloop; 
+    elseif j=ip;
+        if n>1;
+            loop i 1 n;
+                dx := x-x|i; dy := y-y|i; dz := z-z|i;
+                dr := dx*dx+dy*dy+dz*dz;
+                dr := sqrt(dr)*dr;
+                velset dr i 1;
+
+                ex := ex+dx/dr; ey := ey+dy/dr; ez := ez+dz/dr;    
+            endloop; 
+        endif;
+    endif;
+  endloop;
+  
+
+  K := 8.9875517874E9; e := 1.60217733E-19;
+  
+  ex := k*e*ex; 
+  ey := k*e*ey; 
+  ez := k*e*ez; 
+  
+endprocedure; 
+
+
+procedure loadPHE filename n Er Ez;
+     variable str 500;  variable ss 50; variable num 1;
+     variable i 1; variable j 1;
+     variable i1 1; variable i2 1;
+     variable count 1; variable flag 1;
+    
+    
+    create_vector n Er; Ez := Er;
+    
+    openf 36 filename 'old';
+        loop j 1 n;
+            read 36 str;
+            i := 1; i1 := i; count := 0; flag := 0;
+            while (i<length(str)+1)*(count<4);
+                substr str i i ss; 
+                if (ss#' ')*(flag=0);
+                    i1 := i;
+                    flag := 1;
+                endif;
+                if (ss=' ')*(flag=1);
+                    i2 := i;
+                    flag := 0;
+                    count := count+1;
+                    
+                    
+                    if count=3;
+                        substr str i1 i2 ss;
+                        stcre ss num;
+                        velset Ez j num;
+                    elseif count=4;
+                        substr str i1 i2 ss;
+                        stcre ss num;
+                        velset Er j num;
+                    endif;
+                endif;   
+
+                if (i=length(str))*(flag=1);
+                    i2 := i;
+                    flag := 0;
+                    count := count+1;
+                    
+                    if count=3;
+                        substr str i1 i2 ss;
+                        stcre ss num;
+                        velset Ez j num;
+                    elseif count=4;
+                        substr str i1 i2 ss;
+                        stcre ss num;
+                        velset Er j num;
+                    endif;
+                endif;
+        
+                i := i+1;
+            endwhile;
+        endloop;    
+    closef 36;
+endprocedure;  
+
+procedure PHEFit npp x y z ex ey ez;
+{npp : number processors}
+{ x : vector of x coordinates}
+{ y : vector of y coordinates}
+{ z : vector of y coordinates}
+{ ex : vector of length npp, with Efield due to positive charges in x direction}
+{ ey : same for y}
+{ ez : same for z}
+    
+    variable r npp;
+    variable dr 1;  { grid size or r}
+    variable dz 1;  { grid size of z}
+    variable ter 1;
+    variable tez 1;
+	variable i 1;
+    
+    procedure efit ir iz r z dr dz er ez;
+      variable er11 1; 
+      variable er12 1;
+	  variable er21 1;
+	  variable er22 1;
+      variable ez11 1;
+      variable ez12 1;
+	  variable ez21 1;
+	  variable ez22 1;
+      variable r1 1;
+      variable r2 1;
+      variable z1 1;
+      variable z2 1;
+      
+      
+      r1 := (int(ir)-1)*dr;
+      r2 := int(ir)*dr;
+      z1 := (int(iz)-1)*dz;
+      z2 := int(iz)*dz;
+	  
+	  {
+	  write 6 int(ir)&int(iz);
+	  write 6 'r1 r2 z1 z2';
+	  write 6 r1&r2&z1&z2;
+	  write 6 'z r' z&r;
+	  }
+      
+      er11 := pher2|((int(iz)-1)*201+int(ir));
+	  er12 := pher2|((int(iz)-1)*201+int(ir)+1);
+	  er21 := pher2|(int(iz)*201+int(ir));
+	  er22 := pher2|(int(iz)*201+int(ir)+1);
+	  ez11 := phez2|((int(iz)-1)*201+int(ir));
+	  ez12 := phez2|((int(iz)-1)*201+int(ir)+1);
+	  ez21 := phez2|(int(iz)*201+int(ir));
+	  ez22 := phez2|(int(iz)*201+int(ir)+1);
+	  
+	  {
+	  write 6 er11&er12&er21&er22;
+	  write 6 ez11&ez12&ez21&ez22;
+	  
+	  write 6 '';
+	  write 6 (z2-z)&(z-z1)&(r2-r)&(r-r1);
+	  write 6 '';
+	  }
+	  er := (z2-z)*(r2-r)*er11+(z-z1)*(r2-r)*er12+(z-z1)*(r-r1)*er22+(z2-z)*(r-r1)*er21;
+	  er := er/(dr*dz);
+	  ez := (z2-z)*(r2-r)*ez11+(z-z1)*(r2-r)*ez12+(z-z1)*(r-r1)*ez22+(z2-z)*(r-r1)*ez21;
+	  ez := ez/(dr*dz);
+	  
+    endprocedure; 
+    
+    
+	{JENNI}
+	pher2 := pher/(sigmax*sigmax);
+	phez2 := phez/(sigmax*sigmax);
+	{pher2 := pher;
+	phez2 := phez;}
+	{Grid size, originally matches grid in file}
+    dr := dr0*sigmax;
+    dz := dz0*sigmax;
+    {dr := 0.06*sqrt(81*115)*1e-6;
+    dz := 0.06*sqrt(81*115)*1e-6;}
+	{/JENNI}
+    
+    r := sqrt(x*x+y*y);
+    ey := r/dr+1;
+    ez := z/dz+1;
+	ex := 0*ez;
+	
+
+	if n>1;
+		loop i 1 n;
+			if ey|i>200; velset ey i 200; endif;
+			if ez|i>200; velset ez i 200; endif;
+			if ez|i<1; velset ez i 1; endif;
+			efit ey|i ez|i r|i z|i dr dz ter tez;
+			velset ex i ter;
+			velset ez i tez;
+		endloop;
+	
+	elseif n=1;
+		if ey>200; ey := 200; endif;
+		if ez>200; ez := 200; endif;
+        if ez<1; ez := 1; endif;
+	    efit ey ez r z dr dz ex ez;
+	endif;
+    
+	ey := y*ex/r;
+	ex := x*ex/r;
+
+    
+endprocedure;
+ 
+ 
+procedure fields npp t x y z ex ey ez bx by bz ;
+
+ 
+ variable f 1; 
+ variable tex npp;
+ variable tey npp;
+ variable tez npp;
+ variable gamma 1;
+ variable nq 1;
+ variable pnq 1 np;
+ variable i 1;
+ variable PHERate 1;
+ 
+ f := 1e-6; 
+
+ gamma := sqrt(1+pz*pz/(me*me));
+ 
+ if nptcl<5e3;
+   CoulombField mnpp n x y gamma*z ex ey ez;
+ elseif lo(1); 
+   runspacecharge npp n np nptcl ns noda nvda rate x y gamma*z ex ey ez;
+ endif;  
+ 
+ bx := -1*pz*ey/(me*c0*c0*1e12);
+ by := pz*ex/(me*c0*c0*1e12);
+ bz := 0*x;
+ ex := gamma*ex;
+ ey := gamma*ey;
+ 
+ if n>0;
+ if mnpp>1e5; 
+    scrlen mnpp;
+    PHEFit mnpp x y z tex tey tez ;
+    scrlen 1e5;
+ elseif lo(1);
+    PHEFit mnpp x y z tex tey tez ;
+ endif;
+ endif;
+ 
+ 
+ {
+ PHERate := 0.8764*exp(-t*1e6/(c0*2.966))+0.1236*exp(-t*1e6/(c0*8.763));
+ 
+ 
+ tex := tex*PHERate;
+ tey := tey*PHERate;
+ tez := tez*PHERate;
+ }
+ 
+ {
+ ploop i 1 np;
+    pnq(i) := n;
+ endploop pnq;
+ 
+ nq := pnq(1);
+ loop i 2 np;
+    nq := nq+pnq(i);
+ endloop;
+
+ 
+ ex := q*f*(ex-nq*tex); ey := q*f*(ey-nq*tey); 
+ ez := q*f*(ez-nq*tez);
+ }
+ 
+ ex := q*f*(ex-nptcl*tex); ey := q*f*(ey-nptcl*tey); 
+ ez := q*f*(ez-nptcl*tez);
+ 
+ 
+ bx := q*bx;
+ by := q*by;
+ bz := q*bz;
+ 
+ 
+ {
+ ex := q*f*ex;
+ ey := q*f*ey;
+ ez := q*f*ez;
+ 
+  
+ bx := q*bx;
+ by := q*by;
+ bz := q*bz;
+ }
+ {
+ bx := ex*0; by := bx; bz := bx;
+ }
+ {
+ ez := ez+f*(-1)*q*0.5*nptcl*e/(pi*dx*dy*8.85418781762e-12);
+ }
+ 
+ {JENNI} 
+ loop i 1 n;
+	if n>1;
+		if z|i<extz; 
+			 velset ez i ez|i-extEz;
+		endif;    
+	elseif lo(1);
+		if z<extz; 
+			ez := ez-extEz;
+		endif;    
+	endif;    
+  endloop;
+ 
+endprocedure;
+   
+PROCEDURE LORENTZ npp X T XP; 
+   {dp/dt = qE + q c*BETAxB, dx/dt = BETA = p/(m*GAMA);GAMA := SQRT(1+p^2/m^2) 
+   3 Positions: m, 3 Momenta: MeV/c, Mass: MeV/c^2, Charge: e, 
+   Time: m, C0 is the global variable for light speed in Mm/s}  
+   
+   {use global: npp q me c0}
+   
+   
+   VARIABLE GAMMA npp ; VARIABLE BETAX npp ; 
+   VARIABLE BETAY npp ; VARIABLE BETAZ npp ; 
+   VARIABLE EX    npp ; VARIABLE EY    npp ; 
+   VARIABLE EZ    npp ; VARIABLE BX    npp ; 
+   VARIABLE BY    npp ; VARIABLE BZ    npp ;
+
+  
+    procedure cmz z z0;
+		{Use global: np npp nptcl n}
+		variable i 1; variable tmpv 1 np; 
+		ploop i 1 np;
+		  tmpv(i) := re(z)*n;
+		endploop tmpv;
+		z0 := 0;
+		loop i 1 np;
+		  z0 := z0+tmpv(i);
+		endloop;
+		z0 := z0/nptcl;
+	endprocedure;
+		
+
+   GAMMA := SQRT(1 + (X(4)*X(4)+X(5)*X(5)+X(6)*X(6))/(me*me)) ; 
+   BETAX := X(4)/(me*GAMMA) ; BETAY := X(5)/(me*GAMMA) ; 
+   BETAZ := X(6)/(me*GAMMA) ; 
+   XP(1)  := BETAX ; XP(2) := BETAY ; XP(3) := BETAZ ; 
+   
+   cmz x(6) pz;   
+
+   FIELDS npp t X(1) x(2) x(3) EX EY EZ BX BY BZ ;  
+
+   XP(4) := q*(EX + C0*(BETAY*BZ - BETAZ*BY)) ; 
+   XP(5) := q*(EY + C0*(BETAZ*BX - BETAX*BZ)) ; 
+   XP(6) := q*(EZ + C0*(BETAX*BY - BETAY*BX)) ; 
+   
+   
+   {write 6 x(3)|1&x(6)|1&ez|1&xp(3)|1&xp(6)|1;}
+   
+   ENDPROCEDURE ;    
+
+procedure ode tx tt fx;
+  { use global mnpp.
+  }
+  if mnpp>1e5; scrlen mnpp;
+    Lorentz mnpp tx tt fx;
+    scrlen 1e5;
+  elseif lo(1);
+    Lorentz mnpp tx tt fx;
+  endif;    
+endprocedure;
+  
+PROCEDURE RK4STEP X XN mnpp N T DT ; {Fourth Order RK integrator single step}   
+   VARIABLE XX mnpp N ; VARIABLE KK mnpp N ; 
+   VARIABLE TT 1 ; VARIABLE I 1 ; 
+   LOOP I 1 N ; XX(I) := X(I) ;  XN(I) := X(I) ; ENDLOOP ; TT := T ;
+
+   
+   ode xx tt kk;  
+   LOOP I 1 N ; XN(I) := XN(I) + KK(I)/6*DT ; ENDLOOP ;
+   LOOP I 1 N ; XX(I) := X(I) + KK(I)/2*DT ; ENDLOOP ; 
+   TT := T + DT/2 ; 
+   
+   ode xx tt kk; 
+   LOOP I 1 N ; XN(I) := XN(I) + KK(I)/3*DT ; ENDLOOP ; 
+   LOOP I 1 N ; XX(I) := X(I) + KK(I)/2*DT ; ENDLOOP ; 
+   TT := T + DT/2 ; 
+   
+   ode xx tt kk; 
+   LOOP I 1 N ; XN(I) := XN(I) + KK(I)/3*DT ; ENDLOOP ;       
+   LOOP I 1 N ; XX(I) := X(I) + KK(I)  *DT ; ENDLOOP ; 
+   TT := T + DT   ; 
+   
+   ode xx tt kk; 
+   LOOP I 1 N ; XN(I) := XN(I) + KK(I)/6*DT ; ENDLOOP ; 
+   
+   
+   ENDPROCEDURE ;  
+
+procedure resetElectrons n x y z px py pz xx;
+  {
+  Delete those electrons with z<0, update x y z px py pz n;
+  input/output: n x y z px py pz;
+  }
+
+  variable record npp; variable i 1; variable cnt 1;
+   
+  procedure dltElectrons record cnt n x;
+  variable tmp npp+1; variable i 1;
+  tmp := 0;
+  loop i 1 cnt;
+    if i=1;
+      if record|i>1;
+        tmp := tmp&x|(1&(record|i-1)); 
+      endif;  
+    elseif lo(1);
+      if record|i>(record|(i-1)+1);
+        tmp := tmp&x|((record|(i-1)+1)&(record|i-1));
+      endif;  
+    endif;    
+  endloop; 
+  if record|i<n;
+    tmp := tmp&x|((record|i+1)&n);
+  endif;  
+  
+  x := tmp|(2&(length(tmp)));
+  endprocedure; 
+  
+  procedure builtRecord record cnt;
+    variable i 1;
+    cnt := 0;  
+  loop i 1 n;
+    if z|i<0; 
+      cnt := cnt+1;
+      velset record cnt i;
+    endif;
+  endloop;
+  endprocedure;
+  {write 6 '*vminz' ip&vmin(z); }
+  
+  if type(z)#1;
+  if (vmin(z)<0);  
+  {
+  write 6 si(ip)&'Electrons deleted!'&s(vmin(z))&si(n); 
+  }
+  if n>1e5; scrlen n; 
+    create_vector n record;
+    scrlen 1e5;
+  elseif lo(1);
+    create_vector n record;
+  endif;
+  
+  if n>1e5; scrlen n; endif;
+  builtRecord record cnt;
+  
+  
+  {write 6 ip&n&length(x)&cnt;}
+  
+  if n+1>1e5; scrlen n+1; endif;
+  dltElectrons record cnt n x;
+  if n+1>1e5; scrlen n+1; endif;
+  dltElectrons record cnt n y;
+  if n+1>1e5; scrlen n+1; endif;
+  dltElectrons record cnt n z;
+  if n+1>1e5; scrlen n+1; endif;
+  dltElectrons record cnt n px;
+  if n+1>1e5; scrlen n+1; endif;
+  dltElectrons record cnt n py;
+  if n+1>1e5; scrlen n+1; endif;
+  dltElectrons record cnt n pz;
+  
+  xx(1) := x;
+  xx(2) := y;
+  xx(3) := z;
+  xx(4) := px;
+  xx(5) := py;
+  xx(6) := pz;
+  
+  
+  n := length(xx(3));
+  scrlen 1e5;
+  {
+  write 6 si(ip)&' finish deleting! '&s(vmin(z))&' '&si(n); 
+  }
+  endif;
+  endif;
+endprocedure; 
+
+procedure runReset n x;
+  scrlen mnpp+1;
+  resetElectrons n x(1) x(2) x(3) x(4) x(5) x(6) x;
+endprocedure;
+
+
+
+procedure readOneLine fileId t dt np x y z px py pz;
+    variable str 2000; variable ss 50; variable num 1;
+    variable i 1; variable j 1; variable count 1;
+    variable i1 1; variable i2 1; variable flag 1;
+    variable idmax 1; 
+    
+    
+    read fileId str;
+    idmax := 9;
+    i := 1; i1 := i; count := 0; flag := 0;
+    while (i<length(str)+1)*(count<idmax);
+        substr str i i ss; 
+        if (ss#' ')*(flag=0);
+            i1 := i;
+            flag := 1;
+        endif;
+        if (ss=' ')*(flag=1);
+            i2 := i;
+            flag := 0;
+            count := count+1;
+            if count=1;
+                substr str i1 i2 ss;
+                stcre ss num;
+                t := num;
+            elseif count=2;
+                substr str i1 i2 ss;
+                stcre ss num;
+                dt := num;
+            elseif count=3;
+                substr str i1 i2 ss;
+                stcre ss num;
+                np := num;
+            elseif count=4;
+                substr str i1 i2 ss;
+                stcre ss num;
+                x := num;
+            elseif count=5;
+                substr str i1 i2 ss;
+                stcre ss num;
+                y := num;
+            elseif count=6;
+                substr str i1 i2 ss;
+                stcre ss num;
+                z := num;
+            elseif count=7;
+                substr str i1 i2 ss;
+                stcre ss num;
+                px := num;
+            elseif count=8;
+                substr str i1 i2 ss;
+                stcre ss num;
+                py := num;
+            elseif count=9;
+                substr str i1 i2 ss;
+                stcre ss num;
+                pz := num;
+            endif;
+        endif; 
+        if (i=length(str))*(flag=1);
+            i2 := i;
+            flag := 0;
+            count := count+1;
+            if count=1;
+                substr str i1 i2 ss;
+                stcre ss num;
+                t := num;
+            elseif count=2;
+                substr str i1 i2 ss;
+                stcre ss num;
+                dt := num;
+            elseif count=3;
+                substr str i1 i2 ss;
+                stcre ss num;
+                np := num;
+            elseif count=4;
+                substr str i1 i2 ss;
+                stcre ss num;
+                x := num;
+            elseif count=5;
+                substr str i1 i2 ss;
+                stcre ss num;
+                y := num;
+            elseif count=6;
+                substr str i1 i2 ss;
+                stcre ss num;
+                z := num;
+            elseif count=7;
+                substr str i1 i2 ss;
+                stcre ss num;
+                px := num;
+            elseif count=8;
+                substr str i1 i2 ss;
+                stcre ss num;
+                py := num;
+            elseif count=9;
+                substr str i1 i2 ss;
+                stcre ss num;
+                pz := num;
+            endif;
+        endif;
+        i := i+1;
+    endwhile;
+endprocedure;
+
+
+procedure readOneLine1 fileId x y z px py pz;
+    variable str 2000; variable ss 50; variable num 1;
+    variable i 1; variable j 1; variable count 1;
+    variable i1 1; variable i2 1; variable flag 1;
+    variable idmax 1; 
+    
+    
+    read fileId str;
+    idmax := 9;
+    i := 1; i1 := i; count := 0; flag := 0;
+    while (i<length(str)+1)*(count<idmax);
+        substr str i i ss; 
+        if (ss#' ')*(flag=0);
+            i1 := i;
+            flag := 1;
+        endif;
+        if (ss=' ')*(flag=1);
+            i2 := i;
+            flag := 0;
+            count := count+1;
+            if count=4;
+                substr str i1 i2 ss;
+                stcre ss num;
+                x := num;
+            elseif count=5;
+                substr str i1 i2 ss;
+                stcre ss num;
+                y := num;
+            elseif count=6;
+                substr str i1 i2 ss;
+                stcre ss num;
+                z := num;
+            elseif count=7;
+                substr str i1 i2 ss;
+                stcre ss num;
+                px := num;
+            elseif count=8;
+                substr str i1 i2 ss;
+                stcre ss num;
+                py := num;
+            elseif count=9;
+                substr str i1 i2 ss;
+                stcre ss num;
+                pz := num;
+            endif;
+        endif; 
+        if (i=length(str))*(flag=1);
+            i2 := i;
+            flag := 0;
+            count := count+1;
+            if count=4;
+                substr str i1 i2 ss;
+                stcre ss num;
+                x := num;
+            elseif count=5;
+                substr str i1 i2 ss;
+                stcre ss num;
+                y := num;
+            elseif count=6;
+                substr str i1 i2 ss;
+                stcre ss num;
+                z := num;
+            elseif count=7;
+                substr str i1 i2 ss;
+                stcre ss num;
+                px := num;
+            elseif count=8;
+                substr str i1 i2 ss;
+                stcre ss num;
+                py := num;
+            elseif count=9;
+                substr str i1 i2 ss;
+                stcre ss num;
+                pz := num;
+            endif;
+        endif;
+        i := i+1;
+    endwhile;
+endprocedure;
+
+ 
+procedure readOneLine2 fileId t dt np;
+    variable str 2000; variable ss 50; variable num 1;
+    variable i 1; variable j 1; variable count 1;
+    variable i1 1; variable i2 1; variable flag 1;
+    variable idmax 1; 
+    
+    
+    read fileId str;
+    idmax := 3;
+    i := 1; i1 := i; count := 0; flag := 0;
+    while (i<length(str)+1)*(count<idmax);
+        substr str i i ss; 
+        if (ss#' ')*(flag=0);
+            i1 := i;
+            flag := 1;
+        endif;
+        if (ss=' ')*(flag=1);
+            i2 := i;
+            flag := 0;
+            count := count+1;
+            if count=1;
+                substr str i1 i2 ss;
+                stcre ss num;
+                t := num;
+            elseif count=2;
+                substr str i1 i2 ss;
+                stcre ss num;
+                dt := num;
+            elseif count=3;
+                substr str i1 i2 ss;
+                stcre ss num;
+                np := num;
+            endif;
+        endif; 
+        if (i=length(str))*(flag=1);
+            i2 := i;
+            flag := 0;
+            count := count+1;
+            if count=1;
+                substr str i1 i2 ss;
+                stcre ss num;
+                t := num;
+            elseif count=2;
+                substr str i1 i2 ss;
+                stcre ss num;
+                dt := num;
+            elseif count=3;
+                substr str i1 i2 ss;
+                stcre ss num;
+                np := num;
+            endif;
+        endif;
+        i := i+1;
+    endwhile;
+endprocedure;
+
+
+procedure readOneLine3 fileId x y z px py pz;
+    variable str 2000; variable ss 50; variable num 1;
+    variable i 1; variable j 1; variable count 1;
+    variable i1 1; variable i2 1; variable flag 1;
+    variable idmax 1; 
+    
+    
+    read fileId str;
+    idmax := 9;
+    i := 1; i1 := i; count := 0; flag := 0;
+    while (i<length(str)+1)*(count<idmax);
+        substr str i i ss; 
+        if (ss#' ')*(flag=0);
+            i1 := i;
+            flag := 1;
+        endif;
+        if (ss=' ')*(flag=1);
+            i2 := i;
+            flag := 0;
+            count := count+1;
+            if count=1;
+                substr str i1 i2 ss;
+                stcre ss num;
+                x := num;
+            elseif count=2;
+                substr str i1 i2 ss;
+                stcre ss num;
+                y := num;
+            elseif count=3;
+                substr str i1 i2 ss;
+                stcre ss num;
+                z := num;
+            elseif count=4;
+                substr str i1 i2 ss;
+                stcre ss num;
+                px := num;
+            elseif count=5;
+                substr str i1 i2 ss;
+                stcre ss num;
+                py := num;
+            elseif count=6;
+                substr str i1 i2 ss;
+                stcre ss num;
+                pz := num;
+            endif;
+        endif; 
+        if (i=length(str))*(flag=1);
+            i2 := i;
+            flag := 0;
+            count := count+1;
+            if count=1;
+                substr str i1 i2 ss;
+                stcre ss num;
+                x := num;
+            elseif count=2;
+                substr str i1 i2 ss;
+                stcre ss num;
+                y := num;
+            elseif count=3;
+                substr str i1 i2 ss;
+                stcre ss num;
+                z := num;
+            elseif count=4;
+                substr str i1 i2 ss;
+                stcre ss num;
+                px := num;
+            elseif count=5;
+                substr str i1 i2 ss;
+                stcre ss num;
+                py := num;
+            elseif count=6;
+                substr str i1 i2 ss;
+                stcre ss num;
+                pz := num;
+            endif;
+        endif;
+        i := i+1;
+    endwhile;
+endprocedure;
+
+
+procedure readTime fileId nt vT vDt vNp;
+    variable t 1;
+    variable dt 1;
+    variable np 1;
+    variable i 1;
+    variable j 1;
+    variable string 1000;
+    
+    create_vector nt vT;
+    create_vector nt vDt;
+    create_vector nt vNp;
+    
+    loop i 1 nt;
+        readOneLine2 fileId t dt np;
+        velset vT i t;
+        velset vDt i dt;
+        velset vNp i np;
+        loop j 1 np-1;
+          read fileID string;
+        endloop;
+    endloop;  
+
+endprocedure;  
+ 
+         
+procedure cmz z z0;
+  {Use global: np npp nptcl n}
+  variable i 1; variable tmpv 1 np; 
+  
+  ploop i 1 np;
+    tmpv(i) := re(z)*n;
+  endploop tmpv;
+  
+  z0 := 0;
+  loop i 1 np;
+    z0 := z0+tmpv(i);
+  endloop;
+  
+  z0 := z0/nptcl;
+  
+  
+endprocedure;
+
+procedure bunchsize x x0 rx;
+  {Use global: np npp nptcl n}
+  variable i 1; variable tmpv 1 np;
+  
+  cmz x x0;
+  ploop i 1 np;
+    tmpv(i) := re((x-x0)*(x-x0))*n;
+  endploop tmpv;
+  
+  rx := 0;
+  loop i 1 np;
+    rx := rx+tmpv(i);
+  endloop;
+  rx := sqrt(rx/nptcl);
+
+endprocedure; 
+
+procedure runBunchsize x i x0 rx;
+  if mnpp>1e5; scrlen mnpp; 
+    bunchsize x(i) x0 rx;
+    scrlen 1e5;
+  elseif lo(1);
+    bunchsize x(i) x0 rx;
+  endif;  
+endprocedure; 
+  
+  
+
+PROCEDURE RK  N X0 X1 Y0  H0 HS H1  EPS BS   Z Y1 ERREST ;
+      { RUNGE KUTTA INTEGRATOR OF ORDER EIGHT WITH AUTOMATIC STEP SIZE CONTROL
+      USING A SEVENTH ORDER ALGORITHM. EACH STEP REQUIRES 13 EVALUATIONS.
+      WRITTEN IN FORTRAN 77                  BY INGOLF KUEBLER  1986
+      REWRITTEN FOR USE WITH COSY INFINITY   BY MARTIN BERZ     1990
+      INPUT PARAMETERS:
+         N          NUMBER OF ODE'S
+         X0, X1     INITIAL AND FINAL VALUES OF INDEPENDENT VARIABLE
+         Y0         INITIAL VALUES OF ODE
+         H0, HS, H1 MINIMUM ALLOWED, SUGGESTED AND MAXIMUM ALLOWED  STEPSIZE
+         EPS, BS    DESIRED ERROR, BACKSTEP BOUNDS (1E-12 < EPS,  BS > EPS
+         Z          2 DIMENSIONAL SCRATCH ARRAY WITH DIMENSIONS N AND 16
+      OUTPUT PARAMETERS:
+         Y1        SOLUTION ARRAY OF LENGTH N
+         ERREST    ESTIMATION OF THE ACTUAL ACCUMULATED ERROR }
+      VARIABLE I 1 ; VARIABLE J 1 ; VARIABLE K 1 ; VARIABLE X 1 ; VARIABLE H 1;
+      VARIABLE RFNORM 1 ; VARIABLE HH0 1 ; VARIABLE HH1 1 ; VARIABLE ISTP 1 ;
+      
+      {The following 1 line is added by He Zhang to enable parallel interation. 
+      09/30/2011}
+      variable pmap 1 np; { Use global variable np. np is the no. of processes.} 
+      
+      PROCEDURE NORM N X AX ; VARIABLE I 1 ; AX := 0 ; LOOP I 1 N ;
+         IF TYPE(X(I))=8 ;AX := MAX(AX,WABS(X(I),WAF)) ; ELSEIF
+         lo(1) ; AX := MAX(AX,ABS(X(I))) ;  ENDIF ; ENDLOOP ; ENDPROCEDURE ;
+      IF LRKCO=0 ; RKCO HSQR A B C D ; LRKCO := 1 ; ENDIF ;      {PREPARATIONS}
+      OPENF 77 'RKLOG.DAT' 'UNKNOWN' ; ISTP := 0 ;
+      WRITE 77 'RUNGE KUTTA: S1 S2 HMIN H HMAX EPS BS ' X0 X1 H0 HS H1 EPS BS ;
+      LOOP I 1 N ; Z(I,1) := Y0(I) ; Z(I,2) := 0.D0 ;    ENDLOOP ;
+      H := ABS(HS) ; HH0 := ABS(H0) ; HH1 := ABS(H1) ;
+      IF X1-X0<0 ; H := -H ; HH0 := -HH0 ; HH1 := -HH1 ; ENDIF ;
+      X := X0 ; RFNORM := 0 ; ERREST := 0 ; ISTP := 0 ;
+      WHILE X#X1 ;                                       {COMPUTE NEW STEPSIZE}
+         IF RFNORM#0 ;        H := H*MIN(4,(EPS/RFNORM)^HSQR) ;          ENDIF ;
+         IF ABS(H)>ABS(HH1) ; H := HH1 ; ELSEIF ABS(H)<ABS(HH0)*.99 ; H := HH0 ;
+            {WRITE 6 ' --- WARNING, MINIMUM STEPSIZE REACHED IN RK ' ;} ENDIF ;
+         IF (X+H-X1)*H>0 ;    H := X1-X ; ENDIF ; ISTP := ISTP + 1 ;
+         WRITE 77 ' RK STEP, S, DS: '&SF(ISTP, '(I6)')&'  '&S(X)&S(H) ;
+         LOOP J 1 13 ; LOOP I 1 N ; Y0(I) := 0 ;  {EVALUATE RHS AT 13 POINTS}
+               LOOP K 1 J-1 ;  Y0(I) := Y0(I) + Z(I,K+3)*B(J,K) ; ENDLOOP ;
+               Y0(I) := H * Y0(I) + Z(I,1) ; ENDLOOP ; ODE Y0 X+H*A(J) Y1 ;
+            LOOP I 1 N ; Z(I,J+3) := Y1(I) ; ENDLOOP ; ENDLOOP ;
+         LOOP I 1 N ; Z(I,2) := 0 ; Z(I,3) := 0 ; {EXECUTE 7TH,8TH ORDER STEPS}
+            LOOP J 1 13 ; Z(I,2) := Z(I,2) + Z(I,J+3)*D(J) ;
+               Z(I,3) := Z(I,3) + Z(I,J+3)*C(J) ; ENDLOOP ;
+            Y1(I) := (Z(I,3)-Z(I,2))*H ; Z(I,3) := Z(I,3)*H+Z(I,1) ; ENDLOOP ;
+         if npp>1e5;
+            scrlen npp;
+            NORM N Y1 RFNORM ;   
+            scrlen 1e5;
+         elseif lo(1);
+         NORM N Y1 RFNORM ;          {ESTIMATE ERROR AND DECIDE ABOUT BACKSTEP}
+         endif;
+         
+         {The following 8 lines are added by He Zhang to enable parallel 
+         interation. 09/30/2011}
+         ploop i 1 np;
+           pmap(i) := rfnorm;
+         endploop pmap;
+         
+         rfnorm := 0;
+         loop i 1 np;
+           rfnorm := rfnorm+pmap(i);
+         endloop;
+         
+         IF (RFNORM>BS)*(ABS(H/H0)>1.2) ; H := H/3 ; RFNORM := 0 ;
+         ELSEIF lo(1) ; LOOP I 1 N ; Z(I,1) := Z(I,3) ; ENDLOOP ; X := X + H ;
+            ERREST := ERREST + RFNORM ; ENDIF ; ENDWHILE ;
+      WRITE 77 ' ERROR ESTIMATE '&S(ERREST) ;
+      LOOP I 1 N ; Y1(I) := Z(I,1) ; ENDLOOP ; CLOSEF 77 ; ENDPROCEDURE ;
+      
+procedure simulation;
+{
+    variable rt 1;
+    variable rdt 1;
+    variable rnp 1;
+    variable rx 1;
+    variable ry 1;
+    variable rz 1;
+    variable rpx 1;
+    variable rpy 1;
+    variable rpz 1;
+ }   
+ 
+    variable pnp 1 np;
+    variable sum 1; 
+    
+    
+    
+    variable x npp dim;
+    variable xn npp dim;
+    
+    {RK8 integrator }
+    variable eps 1;         {exptected error } 
+    variable bs 1;          {backstep bounds}
+    variable z npp 6 16;        {Schratch varaible } 
+    variable errest 1;      {estimated error }
+  
+    variable fileId 1;
+    variable i 1;
+    variable j 1;
+    variable jj 1;
+    variable vt nt;
+    variable vDt nt;
+    variable vNp nt;
+    variable b1 1;
+    variable b2 1;
+    
+    procedure addNewParticle cnpp;
+        variable tx b2-b1;
+        variable ty b2-b1;
+        variable tz b2-b1;
+        variable tpx b2-b1;
+        variable tpy b2-b1;
+        variable tpz b2-b1;
+        
+        variable pnt 1;
+        variable count 1;
+        variable str 1000;
+        variable i 1;
+        
+        variable rx 1;
+        variable ry 1;
+        variable rz 1;
+        variable rpx 1;
+        variable rpy 1;
+        variable rpz 1;
+
+        
+        if cnpp>1;
+            create_vector cnpp tx;
+            ty := tx;
+            tz := tx;
+            tpx := tx;
+            tpy := tx;
+            tpz := tx;
+        endif;
+        count := 0;
+        if cnpp>0;
+            loop i b1 b2-1;
+                if i#(nc*np+ip);
+                    read fileId str;
+                elseif i=(nc*np+ip);   
+                    readOneLine1 fileId rx ry rz rpx rpy rpz;
+                    count := count+1;
+                    nc := nc+1;
+                    if cnpp>1;
+                        velset tx count rx;
+                        velset ty count ry;
+                        velset tz count rz;
+                        velset tpx count rpx;
+                        velset tpy count rpy;
+                        velset tpz count rpz;
+                    elseif cnpp=1;
+                        tx := rx;
+                        ty := ry;
+                        tz := rz;
+                        tpx := rpx;
+                        tpy := rpy;
+                        tpz := rpz;
+                    endif;
+                endif;
+            endloop;
+            if n>0; 
+                x(1) := x(1)&tx;
+                x(2) := x(2)&ty;
+                x(3) := x(3)&tz;
+                x(4) := x(4)&tpx;
+                x(5) := x(5)&tpy;
+                x(6) := x(6)&tpz;     
+            elseif lo(1);
+                x(1) := tx;
+                x(2) := ty;
+                x(3) := tz;
+                x(4) := tpx;
+                x(5) := tpy;
+                x(6) := tpz;
+            endif; 
+            n := length(x(1));
+        elseif cnpp=0;
+                loop i b1 b2-1;
+                    read fileId str;
+                endloop;
+        endif;
+        
+        
+    endprocedure; 
+   
+    procedure loadParticle;
+       variable pnt 1;
+       variable count 1;
+       variable pnp 1 np;
+       
+       
+       {find how many new particle will be load at this time step}
+       count := 0;
+       pnt := nc*np+ip;
+       while (pnt>b1-1)*(pnt<b2);
+            pnt := pnt+np;
+            count := count+1;
+       endwhile; 
+       { add new particles into the existing group }
+       
+       if mnpp+count>1e5;
+            scrlen mnpp+count; 
+       {
+       if npp>1e5;
+            scrlen npp;}
+            addNewParticle count;
+            scrlen 1e5;
+       elseif lo(1);
+            addNewParticle count;
+       endif;     
+       ploop pnt 1 np;
+            pnp(pnt) := n;
+       endploop pnp;
+       
+       mnpp := pnp(1); nptcl := pnp(1);
+       loop pnt 2 np;
+            if pnp(pnt)>mnpp;
+                mnpp := pnp(pnt);
+            endif;
+            nptcl := nptcl + pnp(pnt);
+       endloop;
+
+    endprocedure; 
+
+    procedure ctnLoadParticle npp;
+        variable tx npp;
+        variable ty npp;
+        variable tz npp;
+        variable tpx npp;
+        variable tpy npp;
+        variable tpz npp;
+        
+        variable rx 1;
+        variable ry 1;
+        variable rz 1;
+        variable rpz 1;
+        variable rpy 1;
+        variable rpx 1;
+        
+        variable i 1;
+        variable j 1;
+        variable count 1;
+        variable str 1000;
+        
+        if ip<(tnptcl-np*(npp-1)+1);
+            count := npp;
+        elseif lo(1);
+            count := npp-1;
+        endif;
+        create_vector count tx;
+        n := count;
+
+        ty := tx;
+        tz := tx;
+        tpx := tx;
+        tpy := tx;
+        tpz := tx;
+        
+        loop i 1 np;
+            if i#ip;
+                if i<(tnptcl-np*(npp-1)+1);
+                    loop j 1 npp;
+                        read fileID str; 
+                    endloop;
+                elseif lo(1);
+                     loop j 1 npp-1;
+                        read fileID str; 
+                    endloop;
+                endif;
+            elseif i=ip;
+                loop j 1 count;
+                     readOneLine3 fileId rx ry rz rpx rpy rpz;
+                     velset tx j rx;
+                     velset ty j ry;
+                     velset tz j rz;
+                     velset tpx j rpx;
+                     velset tpy j rpy;
+                     velset tpz j rpz;
+                endloop;
+            endif;                
+        endloop;
+        x(1) := tx;
+        x(2) := ty;
+        x(3) := tz;
+        x(4) := tpx;
+        x(5) := tpy;
+        x(6) := tpz;
+    endprocedure;
+      procedure maxN;
+    variable pnpp 1 np; variable i 1;
+    
+    {n := length(x(1));}
+    ploop i 1 np;
+      pnpp(i) := n;
+    endploop pnpp;
+    
+    mnpp := pnpp(1); nptcl := mnpp;
+    loop i 2 np;
+      if mnpp<pnpp(i); mnpp := pnpp(i); endif;
+      nptcl := nptcl+pnpp(i);
+    endloop;
+    
+  endprocedure; 
+  
+  procedure adjustNs;
+    if nptcl<0.5e5;
+      ns := 40;
+    elseif nptcl<0.5e6;
+      ns := 200;
+    elseif nptcl<2.5e6;
+      ns := 400;
+    elseif nptcl<3.5e6;
+      ns := 600;    
+    elseif lo(1);
+      ns := 800;
+    endif;       
+  endprocedure;
+     
+  procedure recordX;   
+    variable j 1;
+    if (int(i/rcdStep)=i/rcdStep)*(n>0);
+      openf 100+ip si(i)&'-x-'&si(ip)&'.txt' 'unknown';
+      if n>1;
+        loop j 1 n;
+            write 100+ip s(x(1)|j)&' '&s(x(2)|j)&' '&s(x(3)|j)&' '&s(x(4)|j)&' '&s(x(5)|j)&' '&s(x(6)|j); 
+        endloop;
+       elseif n=1;
+            write 100+ip s(x(1))&' '&s(x(2))&' '&s(x(3))&' '&s(x(4))&' '&s(x(5))&' '&s(x(6)); 
+       endif;
+      closef 100+ip;       
+    endif;
+  endprocedure;
+  
+  procedure writeScreen;
+        variable rz 1; variable z0 1;
+        variable rx 1; variable x0 1;
+        variable ry 1; variable y0 1;
+        variable rpx 1; variable px0 1;
+        variable rpy 1; variable py0 1;
+        variable rpz 1; variable pz0 1;
+        variable rcd 1000;
+        
+        
+        if mnpp>1e5; scrlen mnpp; 
+            runBunchsize x 3 z0 rz;
+            scrlen mnpp; 
+            runBunchsize x 1 x0 rx;
+            scrlen mnpp;             
+            runBunchsize x 2 y0 ry; 
+            scrlen mnpp; 
+            runBunchsize x 4 px0 rpx;
+            scrlen mnpp;             
+            runBunchsize x 5 py0 rpy; 
+            scrlen mnpp; 
+            runBunchsize x 6 pz0 rpz;     
+        elseif lo(1);
+            runBunchsize x 3 z0 rz;
+            runBunchsize x 1 x0 rx; 
+            runBunchsize x 2 y0 ry; 
+            runBunchsize x 4 px0 rpx; 
+            runBunchsize x 5 py0 rpy; 
+            runBunchsize x 6 pz0 rpz;     
+        endif;
+        
+        if ip=1; 
+            rcd := si(i)&' '&si(nptcl)&' '&s(t);
+            rcd := rcd&' '&s(x0)&' '&s(y0)&' '&s(z0)&' '&s(rx)&' '&s(ry)&' '&s(rz);
+            rcd := rcd&' '&s(px0)&' '&s(py0)&' '&s(pz0)&' '&s(rpx)&' '&s(rpy)&' '&s(rpz);
+  
+            write 45 rcd;
+        endif;
+
+		{JENNI}
+        sigmax := rx/(sigmax0);
+        write 6 sigmax;
+    
+  endprocedure; 
+  
+  procedure setX;
+    variable j 1;
+    loop j 1 dim;
+       x(j) := xn(j);
+    endloop;
+  endprocedure; 
+  
+    fileID := 55;
+  if CTN=0;  
+    openf fileID iniCondition 'old';
+    
+    readTime fileId nt vT vDt vNp;
+    
+    closef fileID; 
+    openf fileID iniCondition 'old';    
+    b1 := 1;
+    
+    openf 45 'screen.txt' 'unknown';
+    
+    if IntCHC=0;
+        eps := 1e-6;
+        bs := 2e-6;
+    endif;
+    
+    loop i 1 nt;
+    {loop i 1 2;}
+        b2 := b1+vNp|i;
+        t := vT|i;
+        loadParticle;
+        {
+         RK4STEP X XN mnpp dim T*c0*1e6 vDt|i*c0*1e6;
+        }
+        
+        if IntCHC=0;
+            if mnpp>1e5;
+                scrlen mnpp;
+                RK4STEP X XN mnpp dim T*c0*1e6 vDt|i*c0*1e6;
+                scrlen 1e5;
+            elseif lo(1);
+                RK4STEP X XN mnpp dim T*c0*1e6 vDt|i*c0*1e6;
+            endif;    
+        elseif IntCHC=1;
+            dt := vDt|i;
+            if mnpp>1e5;
+                scrlen mnpp;
+                RK  6 t*c0*1e6 (t+dt)*c0*1e6 x  vDt|i*c0*1e6 vDt|i*c0*1e6 vDt|i*c0*1e6  EPS BS Z xn ERREST ;
+                scrlen 1e5;
+            elseif lo(1);
+                RK  6 t*c0*1e6 (t+dt)*c0*1e6 x  vDt|i*c0*1e6 vDt|i*c0*1e6 vDt|i*c0*1e6  EPS BS Z xn ERREST ;
+            endif;
+        elseif lo(1);
+            write 6 'Please select a integrator';
+            quit 0;
+        endif;
+        
+        t := t+vDt|i;
+        
+        if (mnpp+1)>1e5; 
+            scrlen mnpp+1;
+            setX;
+            runReset n x;
+            maxN;
+            scrlen 1e5;
+        elseif lo(1);
+            setX;
+            if n>0;
+                resetElectrons n x(1) x(2) x(3) x(4) x(5) x(6) x;
+            endif;  
+            maxN;            
+        endif;  
+        
+        b1 := b2;
+        if ip=1;
+            write 6 i&nptcl;
+        endif;
+        writeScreen;
+        
+        if mnpp>1e5; 
+            scrlen mnpp;
+            recordX;
+            scrlen 1e5;
+        elseif lo(1);
+            recordX;
+        endif;
+        adjustNs;
+        
+    endloop; 
+    closef fileID;
+  endif;
+  
+  if CTN=1;
+    openf fileID iniCondition 'old';    
+    ctnLoadParticle npp;
+    closef fileID;
+    openf 45 'screen.txt' 'unknown';
+    mnpp := npp;
+    nptcl := tnptcl;
+    adjustNs;
+  endif;
+    
+    loop j 1 nr;
+        loop i i+1 i+aNt(j);
+        {
+            if mnpp>1e5;
+                scrlen mnpp;
+                maxN;
+                scrlen 1e5;
+            elseif lo(1);
+                maxN;
+            endif;
+            adjustNs;
+            }
+            {
+            RK4STEP X XN mnpp dim T aDt(j)*c0*1e6;
+            }
+            if IntCHC=0;
+                if mnpp>1e5;
+                    scrlen mnpp;
+                    RK4STEP X XN mnpp dim T*c0*1e6 aDt(j)*c0*1e6;
+                    scrlen 1e5;
+                elseif lo(1);
+                    RK4STEP X XN mnpp dim T*c0*1e6 aDt(j)*c0*1e6;
+                endif;    
+            elseif IntCHC=1;
+                dt := aDt(j);
+                if mnpp>1e5;
+                    scrlen mnpp;
+                    RK  6 t*c0*1e6 (t+dt)*c0*1e6 x  aDt(j)*c0*1e6 aDt(j)*c0*1e6 aDt(j)*c0*1e6  EPS BS Z xn ERREST ;
+                    scrlen 1e5;
+                elseif lo(1);
+                    RK  6 t*c0*1e6 (t+dt)*c0*1e6 x  aDt(j)*c0*1e6 aDt(j)*c0*1e6 aDt(j)*c0*1e6  EPS BS Z xn ERREST ;
+                endif;    
+            elseif lo(1);
+                write 6 'Please select a integrator';
+                quit 0;
+            endif;
+        
+            
+            t := t+aDt(j);
+            
+            if (mnpp+1)>1e5; 
+                scrlen mnpp+1;
+                setX;
+                runReset n x;
+                maxN;
+                scrlen 1e5;
+            elseif lo(1);
+                setX;
+                if n>0;
+                    resetElectrons n x(1) x(2) x(3) x(4) x(5) x(6) x;
+                endif;  
+                maxN;
+            endif;            
+            adjustNs;
+            
+            if ip=1;
+                write 6 i&nptcl;
+            endif;
+            writeScreen;
+            if mnpp>1e5; 
+                scrlen mnpp;
+                recordX;
+                scrlen 1e5;
+            elseif lo(1);
+                recordX;
+            endif;
+        endloop;
+    endloop;
+
+    closef 45;
+    
+    {
+    ploop i 1 np;
+        pnp(i) := n;
+    endploop pnp;
+    }
+    
+    {
+    if ip=1;
+        sum := 0;
+        loop i 1 np;
+            write 6 pnp(i); 
+            sum := sum+pnp(i);
+        endloop;    
+        write 6 'total number of particles' sum;
+    endif;
+    }
+
+{
+    write 6 ip&vmin(x(3));
+}
+    {
+    loop i 1 10;
+    
+    readOneLine fileId rt rdt rnp rx ry rz rpx rpy rpz;
+    write 6 i;
+    write 6 rt&rdt&rnp&rx&ry&rz&rpx&rpy&rpz;
+    
+    endloop;
+     }
+     
+   
+
+
+endprocedure;
+
+{=================== The main program starts here ======================}
+
+
+
+pnpro np; ploop i 1 np; ip := i; endploop;
+
+openf 77 'PE-setup.txt' 'old';
+
+
+read 77 ctn; 
+if ctn=1;
+    read 77 t;
+endif;
+
+read 77 iniCondition; 
+read 77 tnptcl;
+read 77 extEz;  
+read 77 extz;  
+read 77 postiveHoleFile; 
+read 77 noda;  
+read 77 mpr;    
+read 77 rcdStep;   
+read 77 rate;  
+read 77 IntCHC; 
+read 77 nr; 
+
+loop i 1 nr;
+    read 77 string; aDt(i):= string;
+    read 77 string; aNt(i):= string;
+endloop;    
+
+closef 77;
+{
+write 6 ctn; write 6 t;
+write 6 iniCondition;
+write 6 tnptcl;
+write 6 extEz;
+
+write 6 postiveHoleFile;
+write 6 noda;
+write 6 mpr;
+write 6 rcdStep;
+write 6 rate;
+write 6 IntCHC;
+write 6 nr;
+
+loop i 1 nr;
+    write 6 aDt(i);
+    write 6 aNt(i);
+endloop;   
+quit 0; 
+}
+
+npp := int(tnptcl/np);
+if npp<tnptcl/np;
+    npp := npp+1;
+endif;
+
+dim := 6;
+{JENNI}
+{number of time steps in which electrons are generated }
+nt := 100;
+
+pi := 4*ATAN(1);
+e := 1.60217733E-19;
+me := 0.511*mpr;
+q := -1*mpr;
+c0 := 299792458E-6; 
+pz := 0;
+{JENNI}
+{This should match what is put when generating positive hole file, parameter sgm}
+{sigmax0 := sqrt(81*115)*2.0*1e-6;}
+dr0 := 0.1930284953057449E-03;
+dz0 := 0.1930284953057449E-03;
+sigmax0 := sqrt(81*115)*1e-6;
+sigmax := 1.0;
+
+ nvda := 3; ns := 40; nbr := 1; 
+daini noda nvda 0 nm;
+
+loadPHE  postiveHoleFile  40401 PHEr PHEz;
+
+simulation;
+endprocedure;
+scrlen 1e5;
+run; end;

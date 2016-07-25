@@ -15,7 +15,7 @@ class MyDataField():
   A class to store the fields for a data table.
   """
 
-  def __init__(self,fieldname,fieldtype="float",unit=None):
+  def __init__(self,fieldname,fieldtype="float",unit=None,**kwargs):
     """
     Initializes the field with the default type of float.  
     """
@@ -46,6 +46,72 @@ class MyDataField():
 
   def getUnit(self):
     return self.unit
+
+class MyDataFieldList():
+  """
+  A class to store and retrieve a list of data fields.
+  """ 
+
+  def __init__(self,field_content = []):
+    self.list =[]
+    for field in field_content:
+      if isinstance(field,MyDataField):
+        self.addField(field)
+      else:
+        if not hasattr(field,"name"):
+          raise MyDataException("Initializing fields through my data field list requires that a name be provided to the field.")
+        if hasattr(field,"type"):
+          field["fieldtype"] = field["type"]
+        fieldname = field["name"]
+        my_field = MyDataField(fieldname,field)
+        self.addField(my_field)
+
+  def getFieldAttrByName(self,fieldname,attr):
+    """
+    Returns the attr of the field with the provided fieldname.
+    """
+    field = self.getFieldByName(fieldname)
+    if attr == "type" or attr == "fieldtype":
+      return field.getType()
+    elif attr == "unit":
+      return field.getUnit()
+    raise MyDataException("The fields do not have an attribute of the type " + str(attr) + ".")
+
+
+  def addField(self,field):
+    """
+    Adds a field to the list.
+    """
+    if self.getFieldByName(field.name) is not None:
+      raise MyDataException("There are multiple fields with the fieldname " + field.name + ".")
+    self.list.append(field)
+
+  def getFieldByName(self,fieldname):
+    """
+    Returns the first field with the provided fieldname or None.  There should
+    at most be one field with this fieldname unless there is an error.
+    """
+    for field in self.list:
+      if field.hasName(fieldname):
+        return field
+    return None
+
+  def reorganizeFields(self,fieldname_order):
+    """
+    Reorders the list of fields by the provided fieldname order.
+    """
+    fieldname_order = list(set(fieldname_order))
+    if len(fieldname_order) != len(self.list):
+      raise MyDataException("The provided fieldname order, " + str(fieldname_order) + ", does not have the expected number of elements.")
+    new_field_order = []
+    for fieldname in fieldname_order:
+      for field in self.list:
+        if field.hasName(fieldname):
+          new_field_order.append(field)
+          continue
+    if len(new_field_order) != len(self.fields):
+      raise MyDataException("The provided fieldname order, " + str(fieldname_order) + ", does not have the expected number of elements with the correct fieldnames.")
+    self.list = new_field_order
 
 class MyDataCell():
   """
@@ -117,15 +183,20 @@ class MyDataRow():
     values are of the same length, then creates 
     and fills the cells of the row.
     """
-    if len(fields) != len(values):
+    if len(fields.list) != len(values):
       message = []
       message.append("The number of elements identified: " + str(len(values)))
       message.append("The expected number of elements identfied:" + str(len(fields)))
       message.append("The elements: " + str(values))
       raise MyDataException("\n".join(message))
-    for i in range(len(fields)):
-      self.cells.append(MyDataCell(fields[i],values[i]))
-        
+    for i in range(len(fields.list)):
+      self.addCell(fields.list[i],values[i])
+
+  def addCell(self,field,value):
+    """
+    Add a field and data to the row.
+    """
+    self.cells.append(MyDataCell(field,value))
 
   def setComment(self,comment):
     self.comment = comment
@@ -152,28 +223,21 @@ class MyDataTable():
     Fields need to be defined before the table can be created.
     """
     self.rows = []
-    self.fields = fields
+    self.fields = MyDataFieldList(fields)
 
-  def addField(self,fieldname,fieldtype="float"):
+  def addField(self,field_content):
     """
     Checks to make sure that the field does not violate any expectations
     and then adds the field if it passes.
     """
-    if self.getFieldByName is not None:
-      raise MyDataException("There are multiple fields with the fieldname " + fieldname + ".")
-    field = MyDataField(fieldname,fieldtype)
-    self.fields.append(field)
-    return field
+    return self.fields.addField(field_content)
 
   def getFieldByName(self,fieldname):
     """
     Returns the first field with the provided fieldname or None.  There should
     at most be one field with this fieldname unless there is an error.
     """
-    for field in self.fields:
-      if field.hasName(fieldname):
-        return field
-    return None
+    return self.fields.getFieldByName(fieldname)
 
   def injectFile(self,filepath,header=False,ignore_first_line=False,delimiter=','):
     """
@@ -222,18 +286,13 @@ class MyDataTable():
     """
     Reorders the list of fields by the provided fieldname order.
     """
-    fieldname_order = list(set(fieldname_order))
-    if len(fieldname_order) != len(self.fields):
-      raise MyDataException("The provided fieldname order, " + str(fieldname_order) + ", does not have the expected number of elements.")
-    new_field_order = []
-    for fieldname in fieldname_order:
-      for field in self.fields:
-        if field.hasName(fieldname):
-          new_field_order.append(field)
-          continue
-    if len(new_field_order) != len(self.fields):
-      raise MyDataException("The provided fieldname order, " + str(fieldname_order) + ", does not have the expected number of elements with the correct fieldnames.")
-    self.fields = new_field_order
+    self.fields.reorganizeFields(fieldname_order)
+
+  def getFieldAttrByName(self,fieldname,attr):
+    """
+    Returns the attr of the field with the provided fieldname.
+    """
+    return self.fields.getFieldAttrByName(fieldname,attr)
 
   def getRow(self,row_number):
     """

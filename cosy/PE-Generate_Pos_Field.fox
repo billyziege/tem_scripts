@@ -1,0 +1,731 @@
+include 'cosy';
+
+procedure run;
+variable npp 1;
+
+procedure fieldCalc npp;
+variable dz0 1; 
+variable dr0 1; 
+variable z0 1; 
+variable nq 1;
+variable sgm 1;
+variable sigma0 1;
+variable ndr 1;
+variable z npp;
+variable r npp;
+variable Ez npp;
+variable Er npp;
+
+variable i 1;
+variable j 1;
+variable t1 1;
+variable t2 1;
+variable plot 1;
+variable ns 1;
+
+
+
+Procedure crv l v;
+  {
+  Create a vector v of length l with all elements zero. 
+  l: length of the vector v;
+  v: the vector 
+  When creating a large vector, one should use scrlen to increase the size
+of the scratch variable. Otherwise this procedure might cause an error as
+"ERROR IN VEUVE, VARIABLE EXHAUSTED!"
+  }
+  procedure runcrv;
+  variable i 1; variable n 1; variable rec 1; variable ll 1; 
+  variable w l; 
+  
+  n := nint(log(l)/log(2)-0.5);
+  ll := l-2^n; rec := 1;
+  while ll>2;
+    w := 0;
+    loop i 1 n; w := w&w; endloop;
+    if rec#1; v := v&w; elseif rec=1; v:=w; rec := 0; endif;    
+    n := nint(log(ll)/log(2)-0.5);
+    ll := ll-2^n;    
+  endwhile;
+  w := 0;
+  loop i 1 n; w := w&w; endloop;
+  if rec#1; v := v&w; elseif rec=1; v:=w; rec := 0; endif;   
+  loop i length(v)+1 l;
+    v := v&0; 
+  endloop;
+  endprocedure;
+  if l>1e5; scrlen l; runcrv; scrlen 1e5;
+  elseif 1=1; runcrv;  endif;
+endprocedure; 
+
+
+function ellipticK k;
+{
+Calculate the first kind of complete elliptic integral by Chebychev Polynomial.
+
+Ref: Chebyshev Polynomial Expansions of Complete Elliptic Integrals, by W.J.Cody
+
+input: k, should be a real number or a vector
+output: ellipticK, a real number or a vector
+}
+  
+  variable b 1 30; {Polynomial coefficients}
+  variable d 1 28; {Polynomial coefficients}
+
+  variable lmt 1; {chech which polynomial should be used}
+  variable tmp npp;
+  variable i 1;
+   
+  procedure bn;
+    b(1) := 1.081544554559937186096290;
+    b(2) := 0.044573221432776369067285;
+    b(3) := 0.004245760369819504775625;
+    b(4) := 0.000502612797966246046695;
+    b(5) := 0.000065770168092913324847;
+    b(6) := 0.000009117111066723701032;
+    b(7) := 0.000001312028529098578893;
+    b(8) := 0.000000193836613347125696;
+    b(9) := 0.000000029199279326654288;
+    b(10):= 0.000000004464889073184542;
+    b(11):= 0.000000000690892119069053;
+    b(12):= 0.000000000107945779201563;
+    b(13):= 0.000000000017001189289808;
+    b(14):= 0.000000000002695771410000;
+    b(15):= 0.000000000000429921254075;
+    b(16):= 0.000000000000068905869287;
+    b(17):= 0.000000000000011091989146;
+    b(18):= 0.000000000000001792348951;
+    b(19):= 0.000000000000000290608238;
+    b(20):= 0.000000000000000047261548;
+    b(21):= 0.000000000000000007707066;
+    b(22):= 0.000000000000000001259903;
+    b(23):= 0.000000000000000000206421;
+    b(24):= 0.000000000000000000033889;
+    b(25):= 0.000000000000000000005574;
+    b(26):= 0.000000000000000000000918;
+    b(27):= 0.000000000000000000000152;
+    b(28):= 0.000000000000000000000025;
+    b(29):= 0.000000000000000000000004;
+    b(30):= 0.000000000000000000000001;
+  endprocedure;
+  
+  procedure dn;
+    d(1) := 2.828265972442414175534433;
+    d(2) := 0.029231164880374515586255;
+    d(3) := 0.001502100007141472876959;
+    d(4) := 0.000120221038191713820917;
+    d(5) := 0.000011833483468559494530;
+    d(6) := 0.000001312339681931508514;
+    d(7) := 0.000000157251910152939813;
+    d(8) := 0.000000019892541914418240;
+    d(9) := 0.000000002619269853431502;
+    d(10):= 0.000000000355664581825016;
+    d(11):= 0.000000000049487430093146;
+    d(12):= 0.000000000007023411959203;
+    d(13):= 0.000000000001013256213007;
+    d(14):= 0.000000000000148210456753;
+    d(15):= 0.000000000000021935423977;
+    d(16):= 0.000000000000003279599077;
+    d(17):= 0.000000000000000494694914;
+    d(18):= 0.000000000000000075202573;
+    d(19):= 0.000000000000000011511240;
+    d(20):= 0.000000000000000001772896;
+    d(21):= 0.000000000000000000274564;
+    d(22):= 0.000000000000000000042733;
+    d(23):= 0.000000000000000000006681;
+    d(24):= 0.000000000000000000001049;
+    d(25):= 0.000000000000000000000165;
+    d(26):= 0.000000000000000000000026;
+    d(27):= 0.000000000000000000000004;
+    d(28):= 0.000000000000000000000001;
+  endprocedure;
+    
+  function Tn n x;
+    Tn := cos(n*acos(2*x-1));
+  endfunction;
+  
+  function ellipticM k;
+    variable m length(k);
+    variable i 1;
+    variable pi 1;
+    
+    pi := 4*atan(1);
+    
+    bn;
+    ellipticM := 0*m;
+    m := 2*k;
+    loop i 30 2 -1;
+      ellipticM := ellipticM+b(i)*Tn(i-1,m);
+    endloop;
+    ellipticM := pi*(ellipticM+0.5*b(1));
+      
+  endfunction;
+ 
+  function ellipticEta k;
+    variable eta length(k);
+    variable i 1;
+    variable logEta length(k);
+
+    eta := 1-k;
+    
+    bn;
+    dn;
+    ellipticEta := 0*eta;
+    logEta := log(1/eta);
+    eta := 2*eta;
+    
+    loop i 28 2 -1;
+      ellipticEta := ellipticEta+(logEta*b(i)+d(i))*Tn(i-1,eta);
+    endloop;
+    ellipticEta := ellipticEta+0.5*(logEta*b(1)+d(1));    
+  endfunction;
+  
+  procedure rangeError;
+    write 6 
+           'Wrong input paramer for the 1st kind elliptic integral!';
+    write 6 'Input should be within the range of [0,1).';       
+    quit 0;
+  endprocedure;
+  
+  procedure typeError;
+    write 6 
+           'Error input type! Input value has to be a real number or a vector.';
+    quit 0;  
+  endprocedure;
+   
+
+  lmt := 0.5;
+  
+  if type(k)=1;
+    if ((k=0)+(k>0))*(k<1);
+      if (k<lmt);
+        ellipticK := ellipticM(k);
+      elseif lo(1);
+        ellipticK := ellipticEta(k);
+      endif;
+    elseif lo(1);
+      rangeError;
+    endif;
+  elseif type(k)=5;
+    if (vmax(k)<1)*((vmin(k)>0)+(vmin(k)=0));
+      ellipticK := ellipticM(k);
+      tmp := ellipticEta(k);
+      loop i 1 length(k);
+        if (k|i>lmt);
+          velset ellipticK i tmp|i;
+        endif;
+      endloop;  
+    elseif lo(1);
+      rangeError;
+    endif;
+  elseif lo(1);
+    typeError;
+  endif;
+
+
+endfunction;
+
+function ellipticE k;
+  variable i 1;
+  variable lmt 1;
+  variable tmp npp;
+  variable p 1 28;      {Polynomial coefficients}
+  variable s 1 30;
+  variable r 1 28;
+  procedure pn;
+  p(1) := 2.928225850405146882999545;
+  p(2) := -.109838557243451911762083;
+  p(3) := -.003370779633972361482362;
+  p(4) := -.000235300858731169414039;
+  p(5) := -.000021764144792006684306;
+  p(6) := -.000002330164928439468235;
+  p(7) := -.000000272992738839219275;
+  p(8) := -.000000033998892039790023;
+  p(9) := -.000000004425755444003036;
+  p(10):= -.000000000595739318488316;
+  p(11):= -.000000000082323461496100;
+  p(12):= -.000000000011618876971255;
+  p(13):= -.000000000001668577566166;
+  p(14):= -.000000000000243130062812;
+  p(15):= -.000000000000035866435645;
+  p(16):= -.000000000000005347403815;
+  p(17):= -.000000000000000804634863;
+  p(18):= -.000000000000000122057159;
+  p(19):= -.000000000000000018647874;
+  p(20):= -.000000000000000002867194;
+  p(21):= -.000000000000000000443363;
+  p(22):= -.000000000000000000068912;
+  p(23):= -.000000000000000000010761;
+  p(24):= -.000000000000000000001687;
+  p(25):= -.000000000000000000000266;
+  p(26):= -.000000000000000000000042;
+  p(27):= -.000000000000000000000007;
+  p(28):= -.000000000000000000000001;
+
+  endprocedure; 
+
+  procedure rn;
+    r(1) := 2.234486860729039004437906;
+    r(2) := 0.119619106284828739818781;
+    r(3) := 0.002526223170143065577453;
+    r(4) := 0.000163880647349182973709;
+    r(5) := 0.000014725839374782494237;
+    r(6) := 0.000001552949525568536576;
+    r(7) := 0.000000180270038622904853;
+    r(8) := 0.000000022313086141845666;
+    r(9) := 0.000000002891801652727708;
+    r(10):= 0.000000000387974701622529;
+    r(11):= 0.000000000053475801578024;
+    r(12):= 0.000000000007531972673412;
+    r(13):= 0.000000000001079853736609;
+    r(14):= 0.000000000000157127892994;
+    r(15):= 0.000000000000023152225698;
+    r(16):= 0.000000000000003448347385;
+    r(17):= 0.000000000000000518428847;
+    r(18):= 0.000000000000000078582084;
+    r(19):= 0.000000000000000011997722;
+    r(20):= 0.000000000000000001843607;
+    r(21):= 0.000000000000000000284931;
+    r(22):= 0.000000000000000000044265;
+    r(23):= 0.000000000000000000006909;
+    r(24):= 0.000000000000000000001083;
+    r(25):= 0.000000000000000000000170;
+    r(26):= 0.000000000000000000000027;
+    r(27):= 0.000000000000000000000004;
+    r(28):= 0.000000000000000000000001;
+  endprocedure;   
+  
+  procedure sn;
+    s(1) := 0.14946 13173 97041 23249 5238;
+    s(2) := 0.07953 59200 87531 32354 3269;
+    s(3) := 0.00531 87128 51459 88673 8760;
+    s(4) := 0.00057 75113 87527 97645 2342;
+    s(5) := 0.00007 26979 10544 54451 3027;
+    s(6) := 0.00000 98588 25599 88472 8901;
+    s(7) := 0.00000 13989 24816 72749 2071;
+    s(8) := 0.00000 02046 58796 80268 6245;
+    s(9) := 0.00000 00306 08041 03831 2187;
+    s(10):= 0.00000 00046 54518 78784 7767;
+    s(11):= 0.00000 00007 17096 49072 8133;
+    s(12):= 0.00000 00001 11644 18260 7866;
+    s(13):= 0.00000 00000 17532 31402 4983;
+    s(14):= 0.00000 00000 02773 16211 2621;
+    s(15):= 0.00000 00000 00441 33789 5123;
+    s(16):= 0.00000 00000 00070 60800 0787;
+    s(17):= 0.00000 00000 00011 34811 2377;
+    s(18):= 0.00000 00000 00001 83120 0952;
+    s(19):= 0.00000 00000 00000 29654 4041;
+    s(20):= 0.00000 00000 00000 04817 4204;
+    s(21):= 0.00000 00000 00000 00784 8193;
+    s(22):= 0.00000 00000 00000 00128 1838;
+    s(23):= 0.00000 00000 00000 00020 9846;
+    s(24):= 0.00000 00000 00000 00003 4426;
+    s(25):= 0.00000 00000 00000 00000 5658;
+    s(26):= 0.00000 00000 00000 00000 0932;
+    s(27):= 0.00000 00000 00000 00000 0154;
+    s(28):= 0.00000 00000 00000 00000 0025;
+    s(29):= 0.00000 00000 00000 00000 0004;
+    s(30):= 0.00000 00000 00000 00000 0001;
+                           
+  endprocedure;
+  
+  function Tn n x;
+    Tn := cos(n*acos(2*x-1));
+  endfunction;
+  
+  function ellipticM k;
+    variable m length(k);
+    variable i 1;
+
+       
+    pn;
+    ellipticM := 0*m;
+    m := 2*k;
+    loop i 28 2 -1;
+      ellipticM := ellipticM+p(i)*Tn(i-1,m);
+    endloop;
+    ellipticM := ellipticM+0.5*p(1);
+      
+  endfunction;
+   
+  function ellipticEta k;
+    variable eta length(k);
+    variable i 1;
+    variable logEta length(k);
+
+    eta := 1-k;
+    
+    rn;
+    sn;
+    logEta := log(1/eta);
+    eta := 2*eta;
+    
+    ellipticEta := logEta*(s(30)*Tn(29,eta)+s(29)*Tn(28,eta));
+    
+    loop i 28 2 -1;
+      ellipticEta := ellipticEta+(logEta*s(i)+r(i))*Tn(i-1,eta);
+    endloop;
+    ellipticEta := ellipticEta+0.5*(logEta*s(1)+r(1));    
+  endfunction;
+  
+   procedure rangeError;
+    write 6 
+           'Wrong input paramer for the 1st kind elliptic integral!';
+    write 6 'Input should be within the range of [0,1].';       
+    quit 0;
+  endprocedure;
+  
+  procedure typeError;
+    write 6 
+           'Error input type! Input value has to be a real number or a vector.';
+    quit 0;  
+  endprocedure;
+   
+  lmt := 0.5;
+  
+  if type(k)=1;
+    if ((k=0)+(k>0))*(k<1);
+      if (k<lmt);
+        ellipticE := ellipticM(k);
+      elseif lo(1);
+        ellipticE := ellipticEta(k);
+      endif;
+    elseif abs(k)=1;
+      ellipticE := 1;    
+    elseif lo(1);
+      rangeError;
+    endif;
+  elseif type(k)=5;
+    if ((vmax(k)<1)+(vmax(k)=1))*((vmin(k)>0)+(vmin(k)=0));
+      ellipticE := ellipticM(k);
+      tmp := ellipticEta(k);
+      loop i 1 length(k);
+        if abs(k|i)=1;
+          velset ellipticE i 1;
+        elseif (k|i>lmt)+(k|i<-1*lmt);
+          velset ellipticE i tmp|i;
+        endif;
+      endloop;  
+    elseif lo(1);
+      rangeError;
+    endif;
+  elseif lo(1);
+    typeError;
+  endif;
+
+
+endfunction;
+
+procedure unitChargeLoopField z0 r0 z r Ez Er;
+  variable k 1; variable kk npp; variable rr npp; variable pi 1;
+  variable i 1;
+  
+  if (r0<0)+(r0=0);
+    write 6 'Error input of r0, r0 should be greater than 0!';
+    quit 0;
+  endif;
+  
+  rr := (r+r0)^2+(z-z0)^2;
+  kk := 4*r*r0/rr;
+  rr := sqrt(rr);
+    
+  K := 8.9875517874E9;
+  pi := 4*atan(1);
+
+  Ez := k*2*ellipticE(kk)*(z-z0)/(rr^3*pi*(1-kk)); 
+  Er := k*2*(ellipticE(kk)*(r*r+r*r0)/((1-kk)*rr)-0.5*rr*(ellipticE(kk)/(1-kk)-ellipticK(kk)))/(pi*r*rr*rr);
+  
+  if type(r)=1;
+    if r=0; 
+      Er := 0; 
+    endif;  
+  elseif type(r)=5;
+    if vmin(kk)=0;
+      loop i 1 length(r);
+        if r|i=0;
+          velset Er i 0;
+        endif;
+      endloop;
+    endif;
+  endif;
+
+endprocedure; 
+
+procedure unitChargeLoopField2 nddr z0 r0 z r Ez Er;
+  variable k 1; variable kk nddr; variable rr nddr; variable pi 1;
+  variable i 1;
+  
+  rr := (r+r0)*(r+r0)+(z-z0)^2;
+  kk := 4*r*r0/rr;
+  rr := sqrt(rr);
+    
+  K := 8.9875517874E9;
+  pi := 4*atan(1);
+
+  Ez := k*2*ellipticE(kk)*(z-z0)/(rr^3*pi*(1-kk)); 
+  Er := k*2*(ellipticE(kk)*(r*r+r*r0)/((1-kk)*rr)-0.5*rr*(ellipticE(kk)/(1-kk)-ellipticK(kk)))/(pi*r*rr*rr);
+  
+  if r=0;
+    Er := 0*Er;
+  endif;
+endprocedure; 
+
+procedure posHolesFieldGauss nq sgm ndr z0 z r Ez Er;
+  variable e 1; variable k 1; variable i 1; variable j 1;
+  variable r1 1; variable r2 1; variable dr 1; variable r0 1;
+  variable tEz npp; variable tEr npp;  variable ttEr 1;
+
+  procedure gaussPlate sgm r Er; 
+    if r>0;
+      Er := 2*k*(1-exp(-0.5*r*r/(sgm*sgm)))/r;
+    elseif r=0;
+      Er := 0;
+    endif;    
+  endprocedure;
+
+  function Q sgm r1 r2;
+    Q := exp(-0.5*r1*r1/(sgm*sgm))-exp(-0.5*r2*r2/(sgm*sgm));
+    if r1>r2;
+      Q := -Q;
+    endif;
+  endfunction;
+  
+  E := 1.60217733E-19;
+  K := 8.9875517874E9;
+
+  Ez := 0*z; Er := Ez;
+  dr := 4*sgm/ndr;
+  
+  loop i 1 ndr;
+    r1 := (i-1)*dr;
+    r2 := i*dr; 
+    r0 := 0.5*(r1+r2);
+    unitChargeLoopField z0 r0 z r tEz tEr;
+    
+    if type(z)=1;
+      if z=z0;
+        gaussPlate sgm r tEr; 
+        tEz := 0;
+      endif;
+    elseif type(z)=5;
+      if vmin(z)<z0;
+        loop j 1 length(z);
+          if z|j=z0;
+            velset tEz j 0;
+            gaussPlate sgm r|j ttEr; 
+            velset tEr j ttEr;
+          endif;
+        endloop;
+      endif;
+    endif;
+    
+    Ez := Ez+Q(sgm,r1,r2)*tEz;
+    Er := Er+Q(sgm,r1,r2)*tEr;  
+  endloop;
+  
+  Ez := nq*e*Ez;
+  Er := nq*e*Er;
+
+endprocedure;
+
+
+procedure posHolesFieldEllipse nq sgm ndr z0 z r Ez Er;
+  variable e 1; variable k 1; variable i 1; variable j 1;
+  variable r1 1; variable r2 1; variable dr 1; variable r0 1;
+  variable tEz npp; variable tEr npp;  variable ttEr 1;
+
+
+  { fraction of charge inside circular area with radius r }
+  procedure ellipticalPlate sgm r Er; 
+    if r>sgm;
+	  Er := 2*k/r;
+    elseif r>0;
+      Er := 2*k/r*(1-(1-(r/sgm)*(r/sgm))^(3/2));
+    elseif r=0;
+      Er := 0;
+    endif;    
+  endprocedure;
+
+  function Q sgm r1 r2;
+    {Q := (1.0-(r1/sgm)^(2.0))^(3.0/2.0)-(1.0-(r2/sgm)^(2.0))^(3.0/2.0);}
+    Q := ((sgm*sgm-r1*r1)^(1.5)-(sgm*sgm-r2*r2)^(1.5))/(sgm*sgm*sgm);
+    if r1>r2;
+      Q := -Q;
+    endif;
+  endfunction;
+  
+  E := 1.60217733E-19;
+  K := 8.9875517874E9;
+
+  Ez := 0*z; Er := Ez;
+  dr := sgm/ndr;
+  
+  loop i 1 ndr;
+    r1 := (i-1)*dr;
+    r2 := i*dr; 
+    r0 := 0.5*(r1+r2);
+    unitChargeLoopField z0 r0 z r tEz tEr;
+    
+    if type(z)=1;
+      if z=z0;
+        ellipticalPlate sgm r tEr; 
+        tEz := 0;
+      endif;
+    elseif type(z)=5;
+      if vmin(z)<z0;
+        loop j 1 length(z);
+          if z|j=z0;
+            velset tEz j 0;
+            ellipticalPlate sgm r|j ttEr; 
+            velset tEr j ttEr;
+          endif;
+        endloop;
+      endif;
+    endif;
+    
+    Ez := Ez+Q(sgm,r1,r2)*tEz;
+    Er := Er+Q(sgm,r1,r2)*tEr;  
+  endloop;
+  
+  Ez := nq*e*Ez;
+  Er := nq*e*Er;
+
+endprocedure;
+
+procedure posHolesFieldUniform nq sgm ndr z0 z r Ez Er;
+  variable e 1; variable k 1; variable i 1; variable j 1;
+  variable r1 1; variable r2 1; variable dr 1; variable r0 1;
+  variable tEz npp; variable tEr npp;  variable ttEr 1;
+
+  procedure uniformPlate sgm r Er; 
+    if r>sgm;
+	  Er := 2*k/r;
+    elseif r>0;
+      Er := 2*k*r/(sgm*sgm);
+    elseif r=0;
+      Er := 0;
+    endif;    
+  endprocedure;
+
+  function Q sgm r1 r2;
+    Q := (r2*r2-r1*r1)/(sgm*sgm);
+    if r1>r2;
+      Q := -Q;
+    endif;
+  endfunction;
+  
+  E := 1.60217733E-19;
+  K := 8.9875517874E9;
+
+  Ez := 0*z; Er := Ez;
+  dr := sgm/ndr;
+  
+  loop i 1 ndr;
+    r1 := (i-1)*dr;
+    r2 := i*dr; 
+    r0 := 0.5*(r1+r2);
+    unitChargeLoopField z0 r0 z r tEz tEr;
+    
+    if type(z)=1;
+      if z=z0;
+        uniformPlate sgm r tEr; 
+        tEz := 0;
+      endif;
+    elseif type(z)=5;
+      if vmin(z)<z0;
+        loop j 1 length(z);
+          if z|j=z0;
+            velset tEz j 0;
+            uniformPlate sgm r|j ttEr; 
+            velset tEr j ttEr;
+          endif;
+        endloop;
+      endif;
+    endif;
+    
+    Ez := Ez+Q(sgm,r1,r2)*tEz;
+    Er := Er+Q(sgm,r1,r2)*tEr;  
+  endloop;
+  
+  Ez := nq*e*Ez;
+  Er := nq*e*Er;
+
+endprocedure;
+
+
+plot := 0;	{Generate data for GNUPlot plotting? 1:Yes, 0:No. Set it 0 to generate the field file using in tracking simulation}
+
+z0 := 0;
+nq := 1;
+ns := 12;
+sigma0 := sqrt(81*115)*1e-6; 
+{JENNI} 
+{Leave uncommented only the one you need to use} 
+{Gaussian}
+sgm := sigma0/2; 
+{Uniform}
+{sgm := 2.0*sigma0; }
+{Elliptical}
+{sgm := sqrt(5.0)*sigma0; }
+{Cigar}
+{sgm := sigma0/10; }
+ns := 400;
+
+{Will calculate the field within the area of ns*sgm*ns*sgm (r*z)}
+
+
+ndr := 1000; {Use ndr circles to model the charge distribution.}
+
+{JENNI}
+{ change the second file name }
+if plot=1;
+	openf 30 'PosHoleField-G_10um_plot.txt' 'unknown';
+elseif lo(1);
+	openf 30 'PosHoleField-G_50um.txt' 'unknown';
+endif;
+
+dr0 := ns*sgm/(npp-1);
+dz0 := ns*sgm/(npp-1);
+
+r := 0&ns*sgm/(npp-1);
+loop i 2 npp-1;
+  r := r&i*ns*sgm/(npp-1);
+endloop;
+
+z := 0*r;
+
+loop j 1+plot npp;
+	write 6 j;
+
+	z := 0*z+(j-1)*ns*sgm/(npp-1);
+
+	{JENNI} 
+	{Leave uncommented only the one you need to use} 
+	{Gaussian}
+	posHolesFieldGauss nq sgm ndr z0 z r Ez Er;
+	{Uniform}
+	{posHolesFieldUniform nq sgm ndr z0 z r Ez Er; }
+	{Elliptical}
+	{posHolesFieldEllipse nq sgm ndr z0 z r Ez Er; }
+	
+	loop i 1 npp;
+		write 30 s(z|i)&' '&s(r|i)&' '&s(Ez|i)&' '&s(Er|i);
+	endloop;
+	if plot=1;
+		write 30 ' ';
+	endif;
+endloop;
+
+closef 30;
+
+write 6 'dr0='&s(dr0);
+write 6 'dz0='&s(dz0);
+
+endprocedure;
+
+npp := 201; {Grid will be npp*npp.}
+
+fieldCalc npp;
+
+endprocedure;
+run; end;
