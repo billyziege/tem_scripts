@@ -18,18 +18,38 @@ class Cartesian3DVector(CoordinateVector):
     values = {"x":float(x), "y":float(y), "z":float(z)}
     CoordinateVector.__init__(self,order,values)
 
-  def convertToCylindrical(self):
+  def convertToCylindrical(self,other=None):
     """
     Returns a cylindrical coordinate system vector with the cooridnates
-    rho, phi, z that correspond to the same x, y, and z values.
+    rho, phi, z that correspond to the same x, y, and z values.  If a second
+    Cartesian3DVector is provided, the rho, theta and z directions are determined
+    by this vector.
     """
-    rho = math.sqrt(self.x**2 + self.y**2)
-    if rho == 0:
-      return Cylindrical3DVector(0,0,self.z)
-    if self.y >= 0:
-      phi = acos(self.x/rho)
-    else:
-      phi = 2*np.pi - math.acos(self.x/rho)
+    if other is None:
+      rho = math.sqrt(self.x**2 + self.y**2)
+      if rho == 0:
+        return Cylindrical3DVector(0,0,self.z)
+      if self.y >= 0:
+        phi = np.arccos(self.x/rho)
+      else:
+        phi = 2*np.pi - math.acos(self.x/rho)
+    elif isinstance(other,Cartesian3DVector):
+      #Get the rho hat vector
+      rho_hat_vector = other
+      rho_hat_vector.z = 0
+      rho_size = abs(rho_hat_vector)
+      if rho_size == 0:
+        rho_hat_vector = Cartesian3DVector(x=1)
+      else:
+        rho_hat_vector = 1/abs(rho_hat_vector)*rho_hat_vector
+      rho = self * rho_hat_vector
+      #And get the theta hat vector
+      if other.z == 0:
+        phi_hat_vector = Cartesian3DVector(y=1)
+      else:
+        phi_hat_vector = (-1/other.z)*rho_hat_vector.__cross_product__(other.z)
+        
+      phi = self * phi_hat_vector
     return Cylindrical3DVector(rho,phi,self.z)
 
   def convertToSpherical(self):

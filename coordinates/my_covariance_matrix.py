@@ -4,6 +4,7 @@ import math
 import argparse
 import numpy as np
 from scipy import constants
+from coordinate_vector_3d import Cylindrical3DVector
 
 class MyCovarianceMatrix():
   """
@@ -13,6 +14,7 @@ class MyCovarianceMatrix():
 
   def __init__(self,phase_volume):
     self.cov_matrix = self.calcCovarianceMatrix(phase_volume)
+    self.order = ["x", "y", "z", "px", "py", "pz", "E"]
 
   def __len__(self):
     return self.cov_matrix.size
@@ -48,21 +50,23 @@ class MyCovarianceMatrix():
     corresponds to Cov(first_variable,second_variable) where both of these
     variables need to be in ["x", "y", "z", "px", "py", "pz", "E"].
     """
-    order = ["x", "y", "z", "px", "py", "pz", "E"]
-    if first_variable not in order:
-      raise CoordinateException("Covariance is only specified between these propetries: " + ", ".join(order))
-    if second_variable not in order:
-      raise CoordinateException("Covariance is only specified between these propetries: " + ", ".join(order))
-    first_index = order.index(first_variable)
-    second_index = order.index(second_variable)
+    if first_variable not in self.order:
+      raise CoordinateException("Covariance is only specified between these propetries: " + ", ".join(self.order))
+    if second_variable not in self.order:
+      raise CoordinateException("Covariance is only specified between these propetries: " + ", ".join(self.order))
+    first_index = self.order.index(first_variable)
+    second_index = self.order.index(second_variable)
     cov_matrix = self.getCovarianceMatrix()
     return cov_matrix[first_index][second_index]
 
-  def printCovarianceMatrix(self,order=["x", "y", "z", "px", "py", "pz", "E"]):
+  def printCovarianceMatrix(self,order=None):
     """
     Returns the covariance matrix with columns/rows in the provided order in upper
     triangular form.
     """
+    if order is None:
+      order = self.order
+    print " ".join(order)
     for o1 in range(len(order)):
       string = ""
       for o2 in range(len(order)):
@@ -78,11 +82,13 @@ class MyCovarianceMatrix():
       print string
     return
 
-  def printCorrelationMatrix(self,order=["x", "y", "z", "px", "py", "pz", "E"]):
+  def printCorrelationMatrix(self,order=None):
     """
     Returns the correlation matrix with columns/rows in the provided order in upper
     triangular form.
     """
+    if order is None:
+      order = self.order
     for o1 in range(len(order)):
       string = ""
       for o2 in range(len(order)):
@@ -100,12 +106,14 @@ class MyCovarianceMatrix():
       print string
     return
 
-  def printMixedMatrix(self,order=["x", "y", "z", "px", "py", "pz", "E"]):
+  def printMixedMatrix(self,order=None):
     """
     Returns the correlation matrix with columns/rows in the provided order in upper
     triangular form for the off diagonal values.  The diagonal values are the
     diagonal values of the covariance matrix (i.e. the variances).
     """
+    if order is None:
+      order = self.order
     for o1 in range(len(order)):
       string = ""
       for o2 in range(len(order)):
@@ -126,15 +134,17 @@ class MyCovarianceMatrix():
       print string
     return
 
-  def getSubDeterminant(self,subelements=["x","y","z","px","py","pz"]):
+  def getSubDeterminant(self,subelements=None):
     """
     Gets the determinant of the sub matrix defined by the sub elements.
     """
+    if subelements is None:
+      sublements = self.order[0:6]
     subkey = ",".join(sorted(subelements))
     if not hasattr(self,"sub_determinant"):
       self.sub_determinant = {}
     if subkey not in self.sub_determinant:
-      order = ["x","y","z","px","py","pz","E"]
+      order = self.order
       subindices = []
       for element in subelements:
         subindices.append(order.index(element))
@@ -175,20 +185,20 @@ class MyEditableCovarianceMatrix(MyCovarianceMatrix):
     corresponds to Cov(first_variable,second_variable) where both of these
     variables need to be in ["x", "y", "z", "px", "py", "pz", "E"].
     """
-    order = ["x", "y", "z", "px", "py", "pz", "E"]
-    if first_variable not in order:
+    if first_variable not in self.order:
       raise CoordinateException("Covariance is only specified between these propetries: " + ", ".join(order))
-    if second_variable not in order:
+    if second_variable not in self.order:
       raise CoordinateException("Covariance is only specified between these propetries: " + ", ".join(order))
     first_index = order.index(first_variable)
     second_index = order.index(second_variable)
     self.cov_matrix[first_index,second_index] = value
 
-  def readCovarianceMatrix(self,filepath,sep=" "):
+  def readCovarianceMatrix(self,filepath,sep=" ",order=None):
     """
     Read covariance matrix from a text file into object.
     """
-    order = ["x", "y", "z", "px", "py", "pz", "E"]
+    if order is None:
+      order = self.order
     cov_matrix = self.getCovarianceMatrix()
     with open(filepath,'r') as f:
       i = 0
@@ -199,3 +209,33 @@ class MyEditableCovarianceMatrix(MyCovarianceMatrix):
           self.setCovarianceElement(order[i],order[j],elements[j-i])
           self.setCovarianceElement(order[j],order[i],elements[j-i])
         i += 1
+
+class MyCylindricalCovarianceMatrix(MyCovarianceMatrix):
+  """
+  An object to provide how I like to interact with the x,y,z,px,py,pz,E
+  covariance matrix.
+  """
+  
+  def __init__(self,phase_volume):
+    self.cov_matrix = self.calcCovarianceMatrix(phase_volume)
+    self.order = ["rho", "phi", "z", "prho", "pphi", "pz", "E"]
+
+  def calcCovarianceMatrix(self,phase_volume):
+    """
+    Uses numpy to calculate the 7 x 7 covariance matrix.
+    """
+    input_array = []
+    for particle in phase_volume:
+      row = []
+      cylindrical_coordinates = particle.x.convertToCylindrical()
+      cylindrical_momentum = particle.p.convertToCylindrical(particle.x)
+      row.append(cylindrical_coordinates.rho)
+      row.append(cylindrical_coordinates.rho*cylindrical_coordinates.phi)
+      row.append(cylindrical_coordinates.z)
+      row.append(cylindrical_momentum.rho)
+      row.append(cylindrical_momentum.phi)
+      row.append(cylindrical_momentum.z)
+      row.append(particle.getEnergy())
+      input_array.append(row)
+    input_array = np.array(input_array).T #Transpose
+    return np.cov(input_array)
