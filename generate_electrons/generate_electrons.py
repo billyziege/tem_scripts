@@ -377,7 +377,7 @@ if __name__ == "__main__":
   parser.add_argument('--fermi_energy', dest="e_fermi", type=float, help='The fermi energy of the electron source. Default is 5.000E-6.', default=5.000E-6)
   parser.add_argument('--work_potential', dest="e_work", type=float, help='The work potential of the electron source. Default is 4.450E-6.', default=4.450E-6)
   parser.add_argument('--photon_energy', dest="e_photon", type=float, help='The energy of the lazer\'s photon. Default is 4.650E-6.', default=4.650E-6)
-  parser.add_argument('--proximity_threshold', dest="proximity_threshold", type=float, help='The minimum allowed distance between generated particles.', default=1E-10)
+  parser.add_argument('--proximity_threshold', dest="proximity_threshold", type=float, help='The minimum allowed distance between generated particles.', default=20E-9)
   parser.add_argument('--turn_off_advance', dest="turn_off_advance", action="store_true", help='Turn off the advancing of the electrons from the cathode.', default=False)
   parser.add_argument('--jennis_dist', dest="jennis_dist", action="store_true", help='Use Jennis distribution instead of my corrected.', default=False)
   parser.add_argument('--uniform_momentum',dest='uniform_momentum',action='store_true',help='Enforces that all particles have the same, average momentum when generated.  Default is off.', default=False)
