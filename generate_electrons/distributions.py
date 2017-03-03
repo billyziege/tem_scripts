@@ -48,7 +48,7 @@ class CircularUniformGen(MyDist):
     """
     Wraps the important parameters we want to vary to the initialization function.
     """
-    MyDist(self,mean,scale,upper,0)
+    MyDist.__init__(self,mean,scale,upper,0)
      
   def _pdf(self, x):
     """The probability density function."""
@@ -118,22 +118,22 @@ class AnnularGaussianGen(PolarGaussianGen):
       x_and_y_sample.append(box_mueller_ring(self.r_dist.scale,self.r_dist.lower,self.r_dist.upper))
     return x_and_y_sample
 
-class PolarUniformGen():
+class PolarUniformGen(MyDist):
 
   def __init__(self,scale=1):
     """
     Wraps the important parameters we want to vary to the initialization function.
     """
-    self.r_dist = CircularUniformGen(0,scale,1)
+    MyDist.__init__(self,0,scale,1)
    
   def getSample(self,n):
     """
     Get a sample of n duples returned as a list of duples.
     """
-    r_sample = self.r_dist.getSample(n)
-    phi_sample = stats.uniform.rvs(size=n)
-    phi_sample = [2 * np.pi * s for s in phi_sample] #Scales
-    return zip(r_sample,phi_sample)
+    x_and_y_sample = []
+    for i in range(n):
+      x_and_y_sample.append(uniform_disc_sample(self.scale))
+    return x_and_y_sample
 
   def generateCartesian3DVector(self,n):
     """
@@ -141,10 +141,10 @@ class PolarUniformGen():
     according to the polar distribution and z set to 0.
     """
     output = []
-    polar_coords = self.getSample(n)
-    for polar_coord in polar_coords:
-      r = Cylindrical3DVector(polar_coord[0],polar_coord[1],0)
-      output.append(r.convertToCartesian())
+    x_and_ys = self.getSample(n)
+    for x_and_y in x_and_ys:
+      r = Cartesian3DVector(x_and_y[0],x_and_y[1],0)
+      output.append(r)
     return output
     
 class PolarElipticalGen(PolarUniformGen):
@@ -212,4 +212,14 @@ def probability_from_normal_distribution(steps,width=3):
   probability = [p/total_probability for p in probability]
   return probability
 
-
+def uniform_disc_sample(scale):
+  """
+  Gets a sample from a uniform disc of radius 1.
+  """
+  a = stats.uniform.rvs()
+  b = stats.uniform.rvs()
+  if a > b: #swap a and b
+    c = a
+    a = b
+    b = c
+  return (b*scale*np.cos(2*np.pi*a/b), b*scale*np.sin(2*np.pi*a/b))
