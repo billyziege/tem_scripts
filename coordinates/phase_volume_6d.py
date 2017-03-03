@@ -146,10 +146,11 @@ class ParticlePhaseCoordinates():
     """
     if self.mass is None:
       raise CoordinateException("The particle mass needs to be specified to calculate the particle momentum from velocity.")
+    speed_light = constants.physical_constants["speed of light in vacuum"][0]#m/sec by default
     values = {}
     for direction in self.v.order:
       gamma = self.calcLorentzGammaFromVelocity(direction)
-      values[direction] = getattr(self.v,direction)*gamma*self.mass
+      values[direction] = getattr(self.v,direction)*gamma*self.mass*speed_light
     self.setMomentum(Cartesian3DVector(**values))
     return self.getMomentum()
 
@@ -293,7 +294,7 @@ class Phase6DVolume():
       output.append(str(particle))
     return "\n".join(output)
 
-  def injectFile(self,filepath,mass=1,momentum_weight=1,header=False,fieldnames=["x","y","z","px","py","pz"],delimiter=" "):
+  def injectFile(self,filepath,mass=1,momentum_weight=1,velocity_weight=1.,header=False,fieldnames=["x","y","z","px","py","pz"],delimiter=" "):
     """
     Reads in the file from filepath and extracts the phasespace according to
     the split on the delimiter.  Fieldnames are only used if header is false, otherwise
@@ -316,9 +317,14 @@ class Phase6DVolume():
           raise Exception("The format of " + filepath + " is inconsistent.")
         row = dict(zip(fieldnames,pieces))
         position = Cartesian3DVector(row["x"],row["y"],row["z"])
-        momentum = Cartesian3DVector(row["px"],row["py"],row["pz"])
-        momentum = (1.0/momentum_weight)*momentum #Rescales momentum
-        self.addParticle(mass,x=position,p=momentum)
+        try:
+          momentum = Cartesian3DVector(row["px"],row["py"],row["pz"])
+          momentum = (1.0/momentum_weight)*momentum #Rescales momentum
+          self.addParticle(mass,x=position,p=momentum)
+        except KeyError:
+          velocity = Cartesian3DVector(row["vx"],row["vy"],row["vz"])
+          velocity = velocity_weight*velocity
+          self.addParticle(mass,x=position,v=velocity)
         
 
   def filterByRadius(self,min_r=None,max_r=None):
@@ -829,10 +835,16 @@ if __name__ == "__main__":
       output.append(np.sqrt(cov_matrix.getSubDeterminant(["phi","pphi"]))/mass_of_electron)
       output.append(np.sqrt(cov_matrix.getSubDeterminant(["z","pz"]))/mass_of_electron)
     else:
+      ex = np.sqrt(cov_matrix.getSubDeterminant(["x","px"]))/mass_of_electron
       output.append(np.sqrt(cov_matrix.getSubDeterminant(["x","px"]))/mass_of_electron)
+      ey = np.sqrt(cov_matrix.getSubDeterminant(["y","py"]))/mass_of_electron
       output.append(np.sqrt(cov_matrix.getSubDeterminant(["y","py"]))/mass_of_electron)
+      ez = np.sqrt(cov_matrix.getSubDeterminant(["z","pz"]))/mass_of_electron
       output.append(np.sqrt(cov_matrix.getSubDeterminant(["z","pz"]))/mass_of_electron)
-      output.append(len(phase_volume)*args.number_of_electrons_per_macroparticle)
+      n = len(phase_volume)*args.number_of_electrons_per_macroparticle
+      output.append(n)
+      output.append(n/(ex*ey))
+      output.append(n/(ex*ey*ez))
     print ",".join([str(o) for o in output])
 
 
