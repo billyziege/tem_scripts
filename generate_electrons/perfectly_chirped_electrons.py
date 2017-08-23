@@ -108,36 +108,36 @@ if __name__ == "__main__":
   dvx = speed_light*args.er/(args.radius)*1e-3 #Both er and radius are in mm, so no conversion there.  The 1e-3 is due to mrad.
   #dvx = dalphax*speed_light/gamma
   #This next bit does random particle generation.
-  #for i in range(0,args.number_of_macroparticles):
-  #  random_position = polar_distribution.generateCartesian3DVector(1).pop()
-  #  z = stats.uniform.rvs(size=1,loc=-np.sqrt(3)*dz,scale=2*np.sqrt(3)*dz)
-  #  random_position.z = z[0]
+  for i in range(0,args.number_of_macroparticles):
+    random_position = polar_distribution.generateCartesian3DVector(1).pop()
+    z = stats.uniform.rvs(size=1,loc=-np.sqrt(3)*dz,scale=2*np.sqrt(3)*dz)
+    random_position.z = z[0]
 
-  #  vxmin = random_position.x*args.chirpx - dvx*np.sqrt(3)
+    vxmin = random_position.x*args.chirpx - dvx*np.sqrt(3)
+    vx = stats.uniform.rvs(size=1,loc=vxmin,scale=2*np.sqrt(3)*dvx)
+
+    vymin = random_position.y*args.chirpx - dvx*np.sqrt(3)
+    vy = stats.uniform.rvs(size=1,loc=vymin,scale=2*np.sqrt(3)*dvx)
+
+    vzmin = args.vz + z*args.chirp - dvz*np.sqrt(3)
+    vz = stats.uniform.rvs(size=1,loc=vzmin,scale=dvz*np.sqrt(3)*2)
+    random_velocity = Cartesian3DVector(vx,vy,vz)
+
+    print str(random_position) + " " + str(random_velocity)
+
+  #This next bit does evenly space generation
+  #d = 2*np.cbrt(2*np.pi*(z_max-z_min)*(args.radius*1e-3)**2/args.number_of_macroparticles)
+  #points = uniform_cylinder(d,2*args.radius*1e-3,z_max-z_min,z_min)
+  #for point in points:
+  #  vxmin = point.x*args.chirpx - dvx*np.sqrt(3)
   #  vx = stats.uniform.rvs(size=1,loc=vxmin,scale=2*np.sqrt(3)*dvx)
 
-  #  vymin = random_position.y*args.chirpx - dvx*np.sqrt(3)
+  #  vymin = point.y*args.chirpx - dvx*np.sqrt(3)
   #  vy = stats.uniform.rvs(size=1,loc=vymin,scale=2*np.sqrt(3)*dvx)
 
-  #  vzmin = args.vz + z*args.chirp - dvz*np.sqrt(3)
+  #  vzmin = args.vz + point.z*args.chirp - dvz*np.sqrt(3)
   #  vz = stats.uniform.rvs(size=1,loc=vzmin,scale=dvz*np.sqrt(3)*2)
   #  random_velocity = Cartesian3DVector(vx,vy,vz)
 
-  #  print str(random_position) + " " + str(random_velocity)
-
-  #This next bit does evenly space generation
-  d = 2*np.cbrt(2*np.pi*(z_max-z_min)*(args.radius*1e-3)**2/args.number_of_macroparticles)
-  points = uniform_cylinder(d,2*args.radius*1e-3,z_max-z_min,z_min)
-  for point in points:
-    vxmin = point.x*args.chirpx - dvx*np.sqrt(2)
-    vx = stats.uniform.rvs(size=1,loc=vxmin,scale=2*np.sqrt(2)*dvx)
-
-    vymin = point.y*args.chirpx - dvx*np.sqrt(2)
-    vy = stats.uniform.rvs(size=1,loc=vymin,scale=2*np.sqrt(2)*dvx)
-
-    vzmin = args.vz + point.z*args.chirp - dvz*np.sqrt(2)
-    vz = stats.uniform.rvs(size=1,loc=vzmin,scale=dvz*np.sqrt(2)*2)
-    random_velocity = Cartesian3DVector(vx,vy,vz)
-
-    print str(point) + " " + str(random_velocity)
+  #  print str(point) + " " + str(random_velocity)
 
