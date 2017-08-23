@@ -654,6 +654,60 @@ class Phase6DVolume():
       total += product
     return total/len(self)
 
+  def getMedian(self,fieldnames):
+    """
+    Checks to see if the median has already been caclulated.  If so, return
+    the previously identified median.  Otherwise, calculate the median and store
+    if for later retrieval and returning.
+    """
+    if not hasattr(self,"medians"):
+      self.medians = {}
+    sortedfieldnames = sorted(fieldnames)
+    fieldname_key = ",".join(sortedfieldnames)
+    if fieldname_key not in self.medians:
+      self.medians[fieldname_key] = self.calcMedian(fieldnames)
+    return self.medians[fieldname_key]
+
+  def calcMedian(self,fieldnames):
+    """
+    This finds the median of the product of the fieldnames across the ensemble
+    of particles.  
+    """
+    values = []
+    for particle in self:
+      product = 1.
+      for fieldname in fieldnames:
+        product *= particle.getValueFromFieldname(fieldname)
+      values.append(product)
+    return np.median(np.asarray(values))
+
+  def getStandardDeviation(self,fieldnames):
+    """
+    Checks to see if the sd has already been caclulated.  If so, return
+    the previously identified sd.  Otherwise, calculate the sd and store
+    if for later retrieval and returning.
+    """
+    if not hasattr(self,"sds"):
+      self.sds = {}
+    sortedfieldnames = sorted(fieldnames)
+    fieldname_key = ",".join(sortedfieldnames)
+    if fieldname_key not in self.sds:
+      self.sds[fieldname_key] = self.calcStandardDeviation(fieldnames)
+    return self.sds[fieldname_key]
+
+  def calcStandardDeviation(self,fieldnames):
+    """
+    This finds the standard deviation of the product of the fieldnames across the ensemble
+    of particles.  
+    """
+    values = []
+    for particle in self:
+      product = 1.
+      for fieldname in fieldnames:
+        product *= particle.getValueFromFieldname(fieldname)
+      values.append(product)
+    return np.std(np.asarray(values))
+
   def getAverageDensity(self):
     """
     Checks to see if the average density has already been caclulated.  If so, return
@@ -765,6 +819,18 @@ class Phase6DVolume():
       self.cyl_cov_matrix = MyCylindricalCovarianceMatrix(self)
     return self.cyl_cov_matrix
 
+  def getValuesFromFieldname(self,fieldname):
+    """
+    Provides an interface between the "x", "y", "z", "px", "py", "pz", and "E"
+    syntax and the way the data is stored in this object. And returns
+    a single numpy array
+    """
+    values = []
+    for particle in self:
+      values.append(particle.getValueFromFieldname(fieldname))
+    return np.asarray(values)
+
+
 class MeanPhase6DVolume(Phase6DVolume):
   """
   An ensemble of 3D position and 3D momentum vectors taken
@@ -798,14 +864,26 @@ if __name__ == "__main__":
   parser.add_argument('--filter_r_max', dest="r_max", type=float, help='Tells the script to filter the phase volume returning particles with r smaller than or eaual to r_max.', default=None)
   parser.add_argument('--filter_theta_min', dest="theta_min", type=float, help='Tells the script to filter the phase volume returning particles with theta greater than or equal to theta_min.', default=None)
   parser.add_argument('--filter_theta_max', dest="theta_max", type=float, help='Tells the script to filter the phase volume returning particles with theta greater than or equal to theta_max.', default=None)
+  parser.add_argument('--input_format', dest="input_format", type=str, help='The format of the input.  The default is xp', default="xp")
+  parser.add_argument('-w','--warp', dest="warp", action="store_true", help='Tells the program that the output is from Warp.  The default is Cosy output.', default=False)
   args = parser.parse_args()
 
-  mass_of_electron = constants.physical_constants["electron mass energy equivalent in MeV"][0]
-  mass_of_macroparticle = args.number_of_electrons_per_macroparticle*mass_of_electron
+  speed_light = constants.physical_constants["speed of light in vacuum"][0] #m/sec by default
+  if args.warp:
+    args.input_format = 'xpv'
+  if args.input_format == 'xp':
+    mass_of_electron = constants.physical_constants["electron mass energy equivalent in MeV"][0]
+  else:
+    mass_of_electron = constants.physical_constants["electron mass"][0]*speed_light*args.number_of_electrons_per_macroparticle
 
   phase_volume = Phase6DVolume()
   for path in args.coordinates_files:
-    phase_volume.injectFile(path,mass=mass_of_electron,momentum_weight=args.number_of_electrons_per_macroparticle)
+    if args.input_format == 'xpv':
+      phase_volume.injectFile(path,mass=mass_of_electron,fieldnames=["x","y","z","px","py","pz","vx","vy","vz"])
+    elif args.input_format == "xv":
+      phase_volume.injectFile(path,mass=mass_of_electron,fieldnames=["x","y","z","vx","vy","vz"])
+    else:
+      phase_volume.injectFile(path,mass=mass_of_electron,momentum_weight=args.number_of_electrons_per_macroparticle)
 
   if args.r_min is not None or args.r_max is not None:
     phase_volume = phase_volume.filterByRadius(min_r=args.r_min,max_r=args.r_max)
